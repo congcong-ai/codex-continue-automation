@@ -42,6 +42,36 @@ func snapshot(_ e:AXUIElement, includeHistory:Bool = true)throws->Node {
 func sidebars(_ root:Node)->[Node] {
  root.all.filter{n in n.sub == "AXLandmarkComplementary" && n.all.contains{$0.sub == "AXLandmarkNavigation" && ["应用导航","App navigation"].contains($0.title)}}
 }
+// 仅操作窗口顶部明确标注“显示”的按钮，不点击首页，也不猜测通用切换按钮。
+// 悬停浮层即使已暴露置顶列表，也应固定展开，否则移开鼠标后列表会消失。
+func sidebarRevealButton(_ root:Node)throws->Node? {
+ let names:Set<String>=["显示侧边栏","Show sidebar"]
+ let candidates=root.all.filter { node in
+  guard node.role == "AXButton",names.contains(node.title) else{return false}
+  var parent=node.parent
+  while let p=parent {
+   if p.sub == "AXLandmarkMain" || p.sub == "AXLandmarkRegion" {return false}
+   if p.sub == "AXLandmarkBanner" {return true}
+   parent=p.parent
+  }
+  return false
+ }
+ guard !candidates.isEmpty else{return nil}
+ let button=try one(candidates,"显示侧边栏按钮不唯一，无法自动展开")
+ guard button.enabled else{throw Failure("显示侧边栏按钮不可用")}
+ return button
+}
+func revealSidebar(_ initial:Node,capture:()throws->Node,perform:(Node)throws->Void,
+                   wait:()->Void = {Thread.sleep(forTimeInterval:0.25)})throws->Node {
+ guard let button=try sidebarRevealButton(initial) else{return initial}
+ try perform(button)
+ for _ in 0..<8 {
+  wait()
+  let fresh=try capture()
+  if try sidebarRevealButton(fresh) == nil,sidebars(fresh).count==1{return fresh}
+ }
+ throw Failure("自动展开侧边栏后未确认固定展开状态，请手动点击顶部显示侧边栏后重试")
+}
 let unpin:Set<String>=["取消置顶聊天","Unpin chat"]
 let composerNames:Set<String>=["和 Codex 一起工作","随心输入","Work with Codex","Ask anything"]
 let sendNames:Set<String>=["发送","发送消息","发送提示","Send","Send message","Send prompt"]
@@ -142,6 +172,31 @@ func selfTest()throws {
  let section=Node("AXGroup",children:[Node("AXButton","置顶"),list])
  let root=Node("AXWindow",children:[Node("AXGroup",sub:"AXLandmarkComplementary",children:[Node("AXGroup","应用导航",sub:"AXLandmarkNavigation"),section])])
  try check(pins(root).reliable && pins(root).rows.count==1,"明确置顶状态")
+ let show=Node("AXButton","显示侧边栏")
+ let banner=Node("AXGroup",sub:"AXLandmarkBanner",children:[show])
+ let folded=Node("AXWindow",children:[banner,Node("AXGroup",sub:"AXLandmarkComplementary",children:[Node("AXGroup","应用导航",sub:"AXLandmarkNavigation"),Node("AXButton","首页")])])
+ var actions=0;var captures=0
+ let expanded=try revealSidebar(folded,capture:{captures+=1;return captures==1 ? folded:root},perform:{node in
+  try check(node === show,"折叠侧栏只点击顶部显示按钮，不点击首页")
+  actions+=1
+ },wait:{})
+ try check(actions==1 && captures==2 && pins(expanded).reliable,"展开后等待新快照，恢复可靠置顶识别")
+ _=try revealSidebar(expanded,capture:{throw Failure("展开状态不应重新读取")},perform:{_ in actions+=1},wait:{})
+ try check(actions==1,"侧栏已展开时不重复切换")
+ let hover=Node("AXWindow",children:[banner,root])
+ _=try revealSidebar(hover,capture:{root},perform:{_ in actions+=1},wait:{})
+ try check(actions==2,"悬停列表已可读时仍固定展开侧栏")
+ let spoof=Node("AXWindow",children:[Node("AXGroup",sub:"AXLandmarkMain",children:[Node("AXButton","显示侧边栏")]),Node("AXButton","Show sidebar")])
+ try check(try sidebarRevealButton(spoof)==nil,"正文及无顶部区域约束的同名按钮不能触发展开")
+ banner.children.append(Node("AXButton","Show sidebar"));banner.children.last?.parent=banner
+ do{_=try sidebarRevealButton(folded);throw Failure("测试失败：重复展开按钮")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败"),"重复展开按钮拒绝操作")}
+ banner.children.removeLast()
+ let disabled=Node("AXWindow",children:[Node("AXGroup",sub:"AXLandmarkBanner",children:[Node("AXButton","显示侧边栏",enabled:false)])])
+ do{_=try sidebarRevealButton(disabled);throw Failure("测试失败：禁用展开按钮")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败"),"禁用展开按钮拒绝操作")}
+ actions=0;captures=0
+ do{_=try revealSidebar(folded,capture:{captures+=1;return folded},perform:{_ in actions+=1},wait:{});throw Failure("测试失败：侧栏未展开")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败") && actions==1 && captures==8,"展开超时有限重读且只点击一次")}
+ let english=Node("AXWindow",children:[Node("AXGroup",sub:"AXLandmarkBanner",children:[Node("AXButton","Show sidebar")])])
+ try check(try sidebarRevealButton(english)?.title=="Show sidebar","英文显示侧边栏按钮兼容")
  let multi=Pins(reliable:true,rows:[Node("AXButton","你好"),Node("AXButton","hello"),Node("AXButton","其它会话")],reason:"测试")
  try check(try limitedTargets(["你好","hello"],multi)==["你好","hello"],"批量限定只选择两条指定会话")
  try check(try limitedTargets(["你好","hello","你好"],multi)==["你好","hello"],"批量限定重复标题去重")
@@ -290,12 +345,24 @@ do {
  guard !windows.isEmpty else{throw Failure("没有可操作窗口")}
  guard let focused=read(ax,"AXFocusedWindow"),let window=windows.first(where:{CFEqual($0,focused)}) else{throw Failure("当前活动会话无法可靠识别：AXFocusedWindow 不存在或不属于应用窗口")}
 
- func get(_ history:Bool = true)throws->Node {
+ func capture(_ history:Bool)throws->Node {
   var last:Error=Failure("未读取快照")
   for attempt in 0..<3 {
    do{return try snapshot(window,includeHistory:history)}catch{last=error;if attempt<2{Thread.sleep(forTimeInterval:0.2)}}
   }
   throw last
+ }
+ func get(_ history:Bool = true)throws->Node {
+  let page=try capture(history)
+  // --inspect 保持纯读取；测试、预约预检和正式执行均适配折叠侧栏。
+  guard !args.contains("--inspect") else{return page}
+  return try revealSidebar(page,capture:{try capture(history)},perform:{button in
+   try requireInteractiveDesktop()
+   guard NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier,
+         let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window) else{throw Failure("展开侧边栏前焦点窗口改变，请保持 Codex 在前台后重试")}
+   try press(button)
+   log("自动展开侧边栏",["说明":"已点击顶部显示侧边栏，等待固定侧栏加载；未发送消息"])
+  })
  }
  var initial=try get(false)
  if isPreflight {log("检查通过",["项目":"应用窗口与辅助功能读取","详情":"已读取焦点窗口的辅助功能树"])}
