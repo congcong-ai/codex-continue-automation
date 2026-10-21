@@ -54,6 +54,11 @@ def main():
         raise ValueError('预约器参数错误。')
     inspect = sys.argv[1:] == ['--inspect']
     print('一次性 Codex 自动继续' + ('（预约只读诊断）' if inspect else ''))
+    print('预约前检查辅助功能权限（不会发送消息）……', flush=True)
+    preflight = subprocess.run([str(BASE/'bin/codex-continue'), '--request-permissions'], check=False)
+    if preflight.returncode != 0:
+        log('预约未建立', 原因='辅助功能权限预检未通过，请授权后在同一个终端重新预约', 返回码=preflight.returncode)
+        return preflight.returncode
     value = input('请输入执行时间（例如 01:40，或 2026-10-22 01:40）：')
     epoch, rollover = parse_time(value)
     if rollover:

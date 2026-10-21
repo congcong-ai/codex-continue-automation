@@ -186,9 +186,31 @@ func selfTest()throws {
  do{_=try identity(identified);throw Failure("测试失败：重名身份")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败"),"重名会话拒绝识别")}
 
 }
+// 权限预检只查询系统信任状态，不读取聊天、不激活目标应用。
+func checkAccessibilityPermission(prompt:Bool)throws {
+ let trusted = prompt
+  ? AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String:true] as CFDictionary)
+  : AXIsProcessTrusted()
+ let executable=URL(fileURLWithPath:CommandLine.arguments[0]).resolvingSymlinksInPath().path
+ log("辅助功能权限检查",["已授权":trusted,"程序路径":executable,"启动终端":ProcessInfo.processInfo.environment["TERM_PROGRAM"] ?? "未提供终端标识"])
+ guard trusted else {
+  if prompt,let url=URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+   let opened=NSWorkspace.shared.open(url)
+   log("辅助功能授权引导",["已打开系统设置":opened])
+  }
+  print("请在 系统设置 → 隐私与安全性 → 辅助功能 中，开启实际运行命令的终端（例如 Terminal、iTerm 或 Codex）。")
+  print("若系统列出 codex-continue，请开启它；需要手动添加时按 +、Command+Shift+G，输入：\(executable)")
+  print("如果已经开启但仍失败，请移除对应旧条目后重新添加；重新编译或移动程序后可能需要重新授权。")
+  print("授权后请回到同一个终端，重新运行 codex-continue.sh --check-permissions，通过后再预约。")
+  throw Failure("缺少辅助功能权限；尚未建立预约，也未发送消息。授权必须由你在系统设置中完成")
+ }
+}
 let args=Array(CommandLine.arguments.dropFirst())
 do {
  if args==["--self-test"]{try selfTest();exit(0)}
+ if args==["--check-permissions"] || args==["--request-permissions"] {
+  try checkAccessibilityPermission(prompt:args==["--request-permissions"]);exit(0)
+ }
  let allowed:Set<String>=["--inspect","--test","--run-now","--current-only","--expect-title","--pinned-title","--self-test"]
  for (i,arg) in args.enumerated() where !(i>0 && ["--expect-title","--pinned-title"].contains(args[i-1])) {guard allowed.contains(arg) else{throw Failure("未知参数：\(arg)")}}
  guard args.filter({["--inspect","--test","--run-now"].contains($0)}).count==1 else{throw Failure("诊断、测试、执行模式必须且只能选一个")}
@@ -211,7 +233,7 @@ do {
        session[kCGSessionOnConsoleKey as String] as? Bool == true,
        session[kCGSessionLoginDoneKey as String] as? Bool == true,
        session["CGSSessionScreenIsLocked"] as? Bool != true else{throw Failure("当前不是已登录且未锁屏的控制台图形会话")}
- guard AXIsProcessTrusted() else{throw Failure("缺少辅助功能权限；请在系统设置中授权终端或本二进制后重试")}
+ guard AXIsProcessTrusted() else{throw Failure("缺少辅助功能权限；请在同一个终端运行 codex-continue.sh --request-permissions 完成授权后重试")}
  let apps=NSRunningApplication.runningApplications(withBundleIdentifier:"com.openai.codex")
  guard apps.count==1 else{throw Failure("未找到唯一的 com.openai.codex 进程")}
  let app=apps[0];let ax=AXUIElementCreateApplication(app.processIdentifier);AXUIElementSetMessagingTimeout(ax,1)

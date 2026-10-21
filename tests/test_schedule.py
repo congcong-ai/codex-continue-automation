@@ -37,11 +37,42 @@ class ExecutionTests(unittest.TestCase):
     def test_execute_exactly_once_readonly(self):
         result,run,_=self.run_main()
         self.assertEqual(result,0)
-        run.assert_called_once()
-        self.assertEqual(run.call_args.args[0][-1],'--inspect')
+        self.assertEqual(run.call_count,2)
+        self.assertEqual(run.call_args_list[0].args[0][-1],'--request-permissions')
+        self.assertEqual(run.call_args_list[1].args[0][-1],'--inspect')
     def test_late_skip(self):
         result,run,_=self.run_main(late=True)
         self.assertEqual(result,2)
-        run.assert_not_called()
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0][-1],'--request-permissions')
+
+    def test_permission_denied_never_prompts_or_schedules(self):
+        from unittest.mock import patch, Mock
+        with patch.object(m.sys,'argv',['schedule.py']), patch('builtins.input') as prompt, patch.object(m,'log') as logger, patch.object(m.time,'sleep') as sleep, patch.object(m.subprocess,'run',return_value=Mock(returncode=2)) as run:
+            self.assertEqual(m.main(),2)
+        prompt.assert_not_called()
+        sleep.assert_not_called()
+        run.assert_called_once_with([str(m.BASE/'bin/codex-continue'),'--request-permissions'],check=False)
+        self.assertEqual(logger.call_args.args[0],'预约未建立')
+
+    def test_permission_checked_before_time_input(self):
+        from unittest.mock import patch, Mock
+        events=[]
+        def execute(command, **kwargs):
+            events.append(command[-1])
+            return Mock(returncode=0)
+        def cancel_input(_):
+            events.append('输入时间')
+            raise EOFError()
+        with patch.object(m.sys,'argv',['schedule.py']), patch('builtins.input',side_effect=cancel_input), patch.object(m.subprocess,'run',side_effect=execute):
+            with self.assertRaises(EOFError):
+                m.main()
+        self.assertEqual(events,['--request-permissions','输入时间'])
+
+    def test_formal_execution_preflights_and_sends_once(self):
+        from unittest.mock import patch, Mock
+        with patch.object(m.sys,'argv',['schedule.py']), patch('builtins.input',return_value='13:40'), patch.object(m,'parse_time',return_value=(1001.0,False)), patch.object(m.time,'time',return_value=1001.0), patch.object(m,'log'), patch.object(m.subprocess,'run',return_value=Mock(returncode=0)) as run:
+            self.assertEqual(m.main(),0)
+        self.assertEqual([call.args[0][-1] for call in run.call_args_list],['--request-permissions','--run-now'])
 
 if __name__=='__main__':unittest.main()

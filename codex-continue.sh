@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 unset TZ
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-if [[ ! -x "$ROOT/bin/codex-continue" ]]; then
+if [[ ! -x "$ROOT/bin/codex-continue" || "$ROOT/Sources/main.swift" -nt "$ROOT/bin/codex-continue" || "$ROOT/install.sh" -nt "$ROOT/bin/codex-continue" ]]; then
   "$ROOT/install.sh"
 fi
 if [[ "${1:-}" == "--schedule-inspect" ]]; then
