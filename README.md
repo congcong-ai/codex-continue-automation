@@ -13,6 +13,7 @@
 ## 导航
 
 - [快速开始](#快速开始)
+- [启动检查与故障处理](docs/preflight.md)
 - [预约与命令](#预约与命令)
 - [发送条件与防重复机制](#发送条件与防重复机制)
 - [常见问题](#常见问题)
@@ -39,7 +40,7 @@
 
 - macOS 14 或更新版本，已安装并登录目标桌面应用。
 - Xcode Command Line Tools，提供 `swiftc`、`xcrun` 等构建工具。
-- Python 3，可用 `python3 --version` 检查。
+- Python 3.9 或更新版本，可用 `python3 --version` 检查。
 - 为实际启动工具的终端或宿主应用授予「辅助功能」权限。
 - Mac 已登录、未锁屏，桌面可交互；Codex 侧边栏展开，目标聊天已保存、标题唯一。
 
@@ -55,7 +56,7 @@ cd codex-continue-automation
 ./install.sh
 ```
 
-默认生成当前机器架构的 `bin/codex-continue`。入口检测到源码或安装脚本比现有二进制更新时，会自动重新构建。项目可放在任意目录，入口会相对自身定位源码和运行文件。
+默认生成当前机器架构的 `bin/codex-continue`。入口自动识别 Intel、Apple Silicon 与 Rosetta，按真实芯片选择 x86_64 或 ARM64；源码、安装或架构脚本更新，以及架构不匹配时，会自动重新构建。项目可放在任意目录，入口会相对自身定位源码和运行文件。
 
 需要同时支持 Intel 和 Apple Silicon 时：
 
@@ -111,7 +112,15 @@ file bin/codex-continue
 ./codex-continue.sh
 ```
 
-预约前会先检查辅助功能权限。缺权限时立即打开授权设置并退出，不询问时间、不建立预约；在系统设置中授权后，请回到同一个终端重新运行。授权检查通过只表示当前权限有效，到时仍会重新检查权限与界面状态。
+启动后先检查系统、芯片与程序架构、Python、日志写入、签名、权限、桌面、应用窗口、置顶列表，以及每个会话的草稿、发送状态和历史基线。终端直接显示原因与处理方法；所有必需条件通过、且至少一个会话可提交后，才询问时间。
+
+缺权限时会打开系统授权设置；其它未通过项目会给出对应处理步骤。没有合格目标时不建立预约。检查会切换会话读取状态，不发送消息。详见[启动检查与故障处理](docs/preflight.md)。
+
+只检查、不预约可运行：
+
+```bash
+./codex-continue.sh --preflight
+```
 
 按提示输入 `01:40` 或 `2026-10-22 01:40`，使用 Mac 的本地时区：
 
@@ -121,7 +130,7 @@ file bin/codex-continue
 - `caffeinate -i` 尽量防止空闲睡眠；合盖、锁屏、退出登录仍可能导致 GUI 不可用。
 - 延迟超过预约时间两分钟时取消，不补发。
 
-**交互预约目前不支持限定会话标题，触发时使用默认目标规则。** 请预先检查置顶会话及草稿：可靠置顶列表中符合条件的会话会被逐个处理；列表无法可靠识别时，可能降级为当前活动会话。需要精确限定目标时，使用上述立即执行命令。
+**交互预约只处理本次启动检查通过的置顶会话。** 会显示可预约与不参与的目标，并保存通过检查的标题；到时再次核对，不会纳入后来新增或后来才准备好草稿的会话。预约要求可靠、非空的置顶列表，不降级到其它会话。需要立即精确限定目标时，使用下面的标题参数。
 
 ### 批量继续多个置顶会话
 
@@ -148,7 +157,8 @@ file bin/codex-continue
 
 | 命令或参数 | 行为 | 会发送吗 |
 | --- | --- | --- |
-| 无参数 | 交互预约一次默认目标执行 | 到时可能发送 |
+| 无参数 | 全面启动检查通过后，预约本次合格置顶目标 | 到时可能发送 |
+| `--preflight` | 全面启动检查，不询问时间、不建立预约 | 否 |
 | `--check-permissions` | 只检查当前启动链的辅助功能权限，不弹出设置 | 否 |
 | `--request-permissions` | 检查权限，缺失时提示授权并打开系统设置 | 否 |
 | `--inspect` | 读取当前焦点窗口 | 否 |
@@ -220,7 +230,7 @@ file bin/codex-continue
 
 ### 日志会包含聊天内容吗？
 
-运行日志写在本地 `logs/执行.jsonl`、`logs/预约.jsonl`，可能包含会话标题、状态和错误。`--inspect` 记录输入框标签、字符数及是否匹配，不输出完整草稿。开发探针 `Sources/Probe.swift` 会输出 AX 树，可能含聊天正文；分享前需脱敏。
+启动原始输出写在 `logs/preflight.log`，执行与预约日志写在本地 `logs/执行.jsonl`、`logs/预约.jsonl`，可能包含会话标题、状态和错误。`--inspect` 记录输入框标签、字符数及是否匹配，不输出完整草稿。开发探针 `Sources/Probe.swift` 会输出 AX 树，可能含聊天正文；分享前需脱敏。
 
 `logs/`、备份、缓存和构建产物已由 `.gitignore` 排除。工具代码不主动上传诊断日志；实际发送后的消息由目标桌面应用按其自身方式处理。
 
@@ -249,10 +259,12 @@ python3 -B -m unittest discover -s tests -p 'test_*.py'
 ```text
 Sources/main.swift             原生会话识别、发送与内置回归测试
 Sources/Probe.swift            开发用 AX 树探针
-codex-continue.sh              命令入口与防空闲睡眠包装
+codex-continue.sh              系统、依赖、架构检查与命令入口
+scripts/runtime.sh             Intel / Apple Silicon / Rosetta 识别
 install.sh                     本机构建、通用构建与临时签名
-schedule.py                    本地时区一次性预约
-tests/test_schedule.py         时间解析与预约执行边界测试
+schedule.py                    启动检查中文提示与一次性预约
+tests/test_schedule.py         启动检查、时间解析与预约执行测试
+tests/test_runtime.py          Intel / Apple Silicon / Rosetta 判断测试
 tests/真实AX消息历史.json        最小测试对话的 AX 回放样本
 docs/                          验证状态与检索说明
 ```

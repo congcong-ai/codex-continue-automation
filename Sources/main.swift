@@ -209,6 +209,12 @@ func selfTest()throws {
  do{_=try identity(identified);throw Failure("测试失败：重名身份")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败"),"重名会话拒绝识别")}
 
 }
+func requireInteractiveDesktop()throws {
+ guard let session=CGSessionCopyCurrentDictionary() as? [String:Any],
+       session[kCGSessionOnConsoleKey as String] as? Bool == true,
+       session[kCGSessionLoginDoneKey as String] as? Bool == true,
+       session["CGSSessionScreenIsLocked"] as? Bool != true else{throw Failure("当前不是已登录且未锁屏的控制台图形会话")}
+}
 // 权限预检只查询系统信任状态，不读取聊天、不激活目标应用。
 func checkAccessibilityPermission(prompt:Bool)throws {
  let trusted = prompt
@@ -228,7 +234,11 @@ func checkAccessibilityPermission(prompt:Bool)throws {
   throw Failure("缺少辅助功能权限；尚未建立预约，也未发送消息。授权必须由你在系统设置中完成")
  }
 }
-let args=Array(CommandLine.arguments.dropFirst())
+let rawArgs=Array(CommandLine.arguments.dropFirst())
+let schedulingPreflight=rawArgs == ["--preflight"]
+let inspectPreflight=rawArgs == ["--preflight-inspect"]
+let isPreflight=schedulingPreflight || inspectPreflight
+let args=schedulingPreflight ? ["--test"] : (inspectPreflight ? ["--inspect"]:rawArgs)
 do {
  if args==["--self-test"]{try selfTest();exit(0)}
  if args==["--check-permissions"] || args==["--request-permissions"] {
@@ -250,15 +260,19 @@ do {
  let guardIndex=args.firstIndex(of:"--expect-title")
  let expected=guardIndex.flatMap{ $0+1<args.count ? args[$0+1]:nil }
  guard !current || expected != nil else{throw Failure("仅当前会话模式必须提供 --expect-title 精确标题")}
+ if isPreflight {try checkAccessibilityPermission(prompt:true)}
  let lockPath=base.appendingPathComponent(".执行锁").path
- let fd=open(lockPath,O_CREAT|O_RDWR,0o600);guard fd>=0,flock(fd,LOCK_EX|LOCK_NB)==0 else{throw Failure("另一个实例正在执行")};defer{close(fd)}
- guard let session=CGSessionCopyCurrentDictionary() as? [String:Any],
-       session[kCGSessionOnConsoleKey as String] as? Bool == true,
-       session[kCGSessionLoginDoneKey as String] as? Bool == true,
-       session["CGSSessionScreenIsLocked"] as? Bool != true else{throw Failure("当前不是已登录且未锁屏的控制台图形会话")}
+ let fd=open(lockPath,O_CREAT|O_RDWR,0o600)
+ guard fd>=0 else{throw Failure("执行锁文件不可写，请检查项目目录权限：\(String(cString:strerror(errno)))")}
+ defer{close(fd)}
+ guard flock(fd,LOCK_EX|LOCK_NB)==0 else{throw Failure("另一个实例正在执行，请等待其结束后重试")}
+ if isPreflight {log("检查通过",["项目":"运行互斥锁","详情":"没有其它实例正在操作界面"])}
+ try requireInteractiveDesktop()
+ if isPreflight {log("检查通过",["项目":"桌面状态","详情":"当前为已登录且未锁屏的本机图形会话"])}
  guard AXIsProcessTrusted() else{throw Failure("缺少辅助功能权限；请在同一个终端运行 codex-continue.sh --request-permissions 完成授权后重试")}
  let apps=NSRunningApplication.runningApplications(withBundleIdentifier:"com.openai.codex")
- guard apps.count==1 else{throw Failure("未找到唯一的 com.openai.codex 进程")}
+ guard apps.count==1 else{throw Failure("未找到唯一的 com.openai.codex 进程，请先打开并登录 Codex 桌面应用")}
+ if isPreflight {log("检查通过",["项目":"目标应用","详情":"已找到唯一的 Codex 桌面应用进程；登录状态仍需由实际界面判断"])}
  let app=apps[0];let ax=AXUIElementCreateApplication(app.processIdentifier);AXUIElementSetMessagingTimeout(ax,1)
  _=AXUIElementSetAttributeValue(ax,"AXManualAccessibility" as CFString,kCFBooleanTrue)
  _=AXUIElementSetAttributeValue(ax,"AXEnhancedUserInterface" as CFString,kCFBooleanTrue)
@@ -284,15 +298,26 @@ do {
   throw last
  }
  var initial=try get(false)
+ if isPreflight {log("检查通过",["项目":"应用窗口与辅助功能读取","详情":"已读取焦点窗口的辅助功能树"])}
  var p=current ? Pins(reliable:false,rows:[],reason:"仅当前会话限定，未枚举置顶目标") : pins(initial)
  if !current {
   for _ in 0..<5 where !p.reliable {
    Thread.sleep(forTimeInterval:0.3);initial=try get(false);p=pins(initial)
   }
  }
+ if schedulingPreflight {
+  guard p.reliable else{throw Failure("预约前无法可靠识别置顶列表：\(p.reason)。请展开侧边栏和置顶分组，确保会话标题唯一后重试；预约不会降级到其它会话")}
+  guard !p.rows.isEmpty else{throw Failure("置顶列表为空。请先置顶至少一个已保存且标题唯一的目标会话，并在输入框写好继续，不要发送")}
+  log("检查通过",["项目":"置顶目标列表","详情":"可靠识别 \(p.rows.count) 个置顶会话，接下来逐个检查提交条件"])
+ }
+ let originalTitle=isPreflight ? try? identity(initial):nil
  log(current ? "仅当前会话限定，未扫描置顶会话" : (p.reliable ? "已可靠识别置顶会话":"无法可靠识别置顶，降级当前活动会话"),["原因":p.reason,"置顶会话":p.rows.map{$0.title}])
  if args.contains("--inspect") {
   let diagnostic=try get()
+  if inspectPreflight {
+   _=try identity(diagnostic)
+   log("检查通过",["项目":"只读诊断目标","详情":"当前会话可可靠识别；只读预约不要求预填继续或发送按钮可用"])
+  }
   do{log("当前活动会话",["标题":try identity(diagnostic)])}catch{log("当前活动会话无法可靠识别",["原因":"\(error)"])}
   do{_=try ready(diagnostic);log("当前提交条件满足，未发送")}catch{log("当前提交条件不满足",["原因":"\(error)"])}
   if current,let expected=expected {
@@ -334,12 +359,18 @@ do {
     log("目标输入框诊断",["会话":title,"输入框":page.all.filter{["AXTextArea","AXTextField"].contains($0.role)}.map{["标签":$0.title,"恰好继续":exact($0.value),"字符数":$0.value.count] as [String:Any]},"主区域数":page.all.filter{$0.sub=="AXLandmarkMain"}.count])
     throw error
    }
+   if schedulingPreflight {
+    try requireInteractiveDesktop()
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier,
+          let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window) else{throw Failure("检查期间前台应用或焦点窗口改变，请保持 Codex 在前台后重试")}
+   }
    let diagnosticBaseline=userMessages(page)
    guard diagnosticBaseline>=0 else{throw Failure("无法建立用户消息基线，未发送；请检查用户消息正文是否可读或包含未知控件")}
    if args.contains("--test"){checkedCount+=1;log("目标识别通过，未发送",["会话":title,"用户继续消息基线":diagnosticBaseline]);continue}
    guard NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier else{throw Failure("Codex 不在前台；为避免抢焦点未发送")}
    // 重建树并重新验证，绝不依赖之前保存的输入框或按钮。
    page=try get();guard try identity(page)==title else{throw Failure("提交前会话发生变化")}
+   try requireInteractiveDesktop()
    let r=try ready(page);let before=userMessages(page)
    guard before>=0 else{throw Failure("无法建立用户消息基线，未发送")}
    guard !attempted.contains(title) else{throw Failure("本次运行已经尝试过此会话")}
@@ -358,6 +389,12 @@ do {
    }
    if !confirmed{uncertainCount+=1;log("结果不确定，不重发",["会话":title,"原因":"未确认新增用户消息；输入框清空不能独立证明成功"])}
   } catch {skippedCount+=1;log("跳过",["会话":title,"原因":"\(error)"])}
+ }
+ if isPreflight,let original=originalTitle,NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier,
+    let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window),
+    let page=try? get(false),(try? identity(page)) != original {
+  let originalRows=sidebars(page).flatMap{$0.all}.filter{$0.role == "AXButton" && $0.title==original}
+  if originalRows.count==1 {try? press(originalRows[0])}
  }
  let outcome = args.contains("--test") ? (checkedCount>0 ? "只读预检通过":"没有目标通过预检") : (attempted.isEmpty ? "未提交任何消息" : (uncertainCount>0 ? "存在不确定结果，请人工核对，勿重发":"已确认新增界面历史消息"))
  log("一次执行结束",["已尝试数":attempted.count,"已确认提交数":confirmedCount,"不确定数":uncertainCount,"跳过数":skippedCount,"预检通过数":checkedCount,"结果":outcome])

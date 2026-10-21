@@ -16,7 +16,7 @@
 4. 执行以下检查，在提交说明中注明结果与尚未验证的部分。
 
 ```bash
-bash -n install.sh codex-continue.sh
+bash -n install.sh codex-continue.sh scripts/runtime.sh
 ./install.sh
 ./codex-continue.sh --self-test
 python3 -B -m unittest discover -s tests -p 'test_*.py'
