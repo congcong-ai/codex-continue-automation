@@ -74,7 +74,10 @@ def main():
         return 2
     log('实际开始执行', 预约时间=target)
     result = subprocess.run([str(BASE/'bin/codex-continue'), '--inspect' if inspect else '--run-now'], check=False)
-    log('一次预约结束', 返回码=result.returncode)
+    status = {0: '只读诊断完成' if inspect else '已确认新增界面历史消息',
+              2: '执行失败', 3: '没有目标满足条件，未提交任何消息',
+              4: '结果不确定，请人工核对，勿重发'}.get(result.returncode, '执行异常')
+    log('一次预约结束', 返回码=result.returncode, 结果=status)
     return result.returncode
 
 if __name__ == '__main__':

@@ -108,12 +108,25 @@ func userMessages(_ root:Node)->Int {
    for sibling in parent.children.dropFirst(index+1) {
     if sibling.role == "AXHeading" {break}
     if sibling.role == "AXGroup" && sibling.sub != "AXApplicationStatus" &&
-       !sibling.all.contains(where:{["AXButton","AXTextArea","AXTextField","AXCheckBox"].contains($0.role)}) &&
+       !sibling.all.contains(where:{
+        if $0.role == "AXButton" {return !["显示更多","显示更少","Show more","Show less"].contains($0.title)}
+        return ["AXTextArea","AXTextField","AXCheckBox"].contains($0.role)
+       }) &&
        sibling.all.contains(where:{$0.role == "AXStaticText" && !$0.value.isEmpty}) {body=sibling;break}
    }
    guard let body=body else{return -1}
-   let text=body.all.filter{$0.role == "AXStaticText"}.map{$0.value}.joined()
-   if exact(text){matches+=1}
+   // 折叠长消息的展开按钮属于正文容器，不能让其它可读用户消息的基线失效。
+   // 按钮标签不计入正文；若折叠内容恰好只暴露“继续”，仍拒绝猜测隐藏正文。
+   func bodyText(_ node:Node)->String {
+    if node.role == "AXButton" {return ""}
+    if node.role == "AXStaticText" {return node.value}
+    return node.children.map{bodyText($0)}.joined()
+   }
+   let text=bodyText(body)
+   if exact(text){
+    guard !body.all.contains(where:{$0.role == "AXButton" && ["显示更多","Show more"].contains($0.title)}) else{return -1}
+    matches+=1
+   }
   }
  }
  return matches
@@ -152,6 +165,16 @@ func selfTest()throws {
  let flat=Node("AXGroup",children:[Node("AXHeading","你说："),Node("AXGroup",children:[Node("AXStaticText","","你好")]),Node("AXStaticText","","7:57"),Node("AXHeading","ChatGPT 说："),Node("AXGroup",children:[Node("AXStaticText","","你好！")]),Node("AXHeading","你说："),Node("AXGroup",children:[Node("AXStaticText","","继续")]),Node("AXStaticText","","12:27"),Node("AXHeading","ChatGPT 说："),Node("AXGroup",children:[Node("AXStaticText","","你想继续哪件事？")])])
  let flatPage=Node("AXWindow",children:[Node("AXGroup","对话",sub:"AXLandmarkRegion",children:[flat])])
  try check(userMessages(flatPage)==1,"真实扁平多轮历史只计用户继续正文，不混入时间和助手回复")
+ let collapsed=Node("AXGroup",children:[Node("AXGroup",children:[Node("AXHeading","较长任务说明",children:[Node("AXStaticText","","较长任务说明")]),Node("AXStaticText","","已经显示的长消息正文")]),Node("AXButton","显示更多",children:[Node("AXStaticText","","显示更多")])])
+ let collapsedRows=Node("AXGroup",children:[Node("AXHeading","你说："),collapsed,Node("AXHeading","ChatGPT 说："),Node("AXGroup",children:[Node("AXStaticText","","答复")]),Node("AXHeading","你说："),Node("AXGroup",children:[Node("AXStaticText","","继续")])])
+ let collapsedPage=Node("AXWindow",children:[Node("AXGroup","对话",sub:"AXLandmarkRegion",children:[collapsedRows])])
+ try check(userMessages(collapsedPage)==1,"长消息含显示更多按钮不阻断后续继续消息基线")
+ collapsedRows.children.removeLast(2)
+ try check(userMessages(collapsedPage)==0,"只有折叠长消息时可建立零条继续基线")
+ collapsed.children=[Node("AXStaticText","","继续"),Node("AXButton","显示更多")]
+ try check(userMessages(collapsedPage)==(-1),"折叠后只暴露继续时不猜测隐藏正文")
+ collapsed.children=[Node("AXStaticText","","其它正文"),Node("AXButton","未知操作")]
+ try check(userMessages(collapsedPage)==(-1),"未知正文操作仍拒绝作为可靠基线")
  let fixture=base.appendingPathComponent("tests/真实AX消息历史.json")
  if fm.fileExists(atPath:fixture.path) {
   func decode(_ d:[String:Any])->Node {Node(d["role"] as? String ?? "",d["title"] as? String ?? "",d["value"] as? String ?? "",sub:d["sub"] as? String ?? "",children:(d["children"] as? [[String:Any]] ?? []).map{decode($0)})}
@@ -287,6 +310,7 @@ do {
   do {let id=try identity(initial);guard expected == nil || expected==id else{throw Failure("当前会话不符合测试限定标题")};targets=[id]}catch{log("当前活动会话无法可靠识别",["原因":"\(error)"]);exit(2)}
  }else{targets=p.rows.map{$0.title}}
  var attempted=Set<String>()
+ var checkedCount=0;var confirmedCount=0;var uncertainCount=0;var skippedCount=0
  for title in targets {
   do {
    var page=try get(false)
@@ -310,7 +334,9 @@ do {
     log("目标输入框诊断",["会话":title,"输入框":page.all.filter{["AXTextArea","AXTextField"].contains($0.role)}.map{["标签":$0.title,"恰好继续":exact($0.value),"字符数":$0.value.count] as [String:Any]},"主区域数":page.all.filter{$0.sub=="AXLandmarkMain"}.count])
     throw error
    }
-   if args.contains("--test"){log("目标识别通过，未发送",["会话":title]);continue}
+   let diagnosticBaseline=userMessages(page)
+   guard diagnosticBaseline>=0 else{throw Failure("无法建立用户消息基线，未发送；请检查用户消息正文是否可读或包含未知控件")}
+   if args.contains("--test"){checkedCount+=1;log("目标识别通过，未发送",["会话":title,"用户继续消息基线":diagnosticBaseline]);continue}
    guard NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier else{throw Failure("Codex 不在前台；为避免抢焦点未发送")}
    // 重建树并重新验证，绝不依赖之前保存的输入框或按钮。
    page=try get();guard try identity(page)==title else{throw Failure("提交前会话发生变化")}
@@ -328,11 +354,14 @@ do {
    for _ in 0..<12 {
     Thread.sleep(forTimeInterval:0.25)
     guard let after=try? get(),(try? identity(after))==title else{break}
-    if userMessages(after)>before {log("消息已提交至界面历史",["会话":title,"证据":"新增你说消息块且正文恰好继续","服务端接收":"无法由AX独立证明"]);confirmed=true;break}
+    if userMessages(after)>before {log("消息已提交至界面历史",["会话":title,"证据":"新增你说消息块且正文恰好继续","服务端接收":"无法由AX独立证明"]);confirmed=true;confirmedCount+=1;break}
    }
-   if !confirmed{log("结果不确定，不重发",["会话":title,"原因":"未确认新增用户消息；输入框清空不能独立证明成功"])}
-  } catch {log("跳过",["会话":title,"原因":"\(error)"])}
+   if !confirmed{uncertainCount+=1;log("结果不确定，不重发",["会话":title,"原因":"未确认新增用户消息；输入框清空不能独立证明成功"])}
+  } catch {skippedCount+=1;log("跳过",["会话":title,"原因":"\(error)"])}
  }
- log("一次执行结束",["已尝试数":attempted.count])
+ let outcome = args.contains("--test") ? (checkedCount>0 ? "只读预检通过":"没有目标通过预检") : (attempted.isEmpty ? "未提交任何消息" : (uncertainCount>0 ? "存在不确定结果，请人工核对，勿重发":"已确认新增界面历史消息"))
+ log("一次执行结束",["已尝试数":attempted.count,"已确认提交数":confirmedCount,"不确定数":uncertainCount,"跳过数":skippedCount,"预检通过数":checkedCount,"结果":outcome])
+ if args.contains("--test") {exit(checkedCount>0 ? 0:3)}
+ exit(attempted.isEmpty ? 3:(uncertainCount>0 ? 4:0))
 } catch {log("失败",["原因":"\(error)"]);exit(2)}
 extension ProcessInfo {var machineArchitecture:String {var info=utsname();uname(&info);return withUnsafePointer(to:&info.machine){$0.withMemoryRebound(to:CChar.self,capacity:1){String(cString:$0)}}}}

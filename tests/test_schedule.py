@@ -75,4 +75,12 @@ class ExecutionTests(unittest.TestCase):
             self.assertEqual(m.main(),0)
         self.assertEqual([call.args[0][-1] for call in run.call_args_list],['--request-permissions','--run-now'])
 
+    def test_no_submission_and_uncertain_results_propagate(self):
+        from unittest.mock import patch, Mock
+        for code, expected in [(3,'没有目标满足条件，未提交任何消息'),(4,'结果不确定，请人工核对，勿重发')]:
+            with self.subTest(code=code), patch.object(m.sys,'argv',['schedule.py']), patch('builtins.input',return_value='13:40'), patch.object(m,'parse_time',return_value=(1001.0,False)), patch.object(m.time,'time',return_value=1001.0), patch.object(m,'log') as logger, patch.object(m.subprocess,'run',side_effect=[Mock(returncode=0),Mock(returncode=code)]) as run:
+                self.assertEqual(m.main(),code)
+                self.assertEqual(run.call_count,2)
+                logger.assert_called_with('一次预约结束',返回码=code,结果=expected)
+
 if __name__=='__main__':unittest.main()
