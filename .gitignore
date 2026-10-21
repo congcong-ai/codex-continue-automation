@@ -1,0 +1,21 @@
+# 本地运行数据与诊断，不发布聊天历史。
+/logs/
+/backups/
+/work/
+/bin/
+/.执行锁
+/验收记录.md
+
+# Python 缓存与系统文件。
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# 本地配置与编辑器文件。
+.env
+.env.*
+!.env.example
+.envrc
+.idea/
+.vscode/
+*.swp

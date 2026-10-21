@@ -1,0 +1,25 @@
+# Codex Continue Automation
+
+> macOS 桌面上的一次性 Codex 自动继续工具，使用 Swift AXUIElement 与 Python 标准库，在用户预先写好「继续」后按条件提交。
+
+## 项目事实
+
+- 平台：macOS 14 及更新版本。
+- 实现：Swift 原生辅助功能接口与 Python 3 标准库，无第三方包。
+- 模式：终端一次性预约、立即执行、只读检查、指定置顶会话批量执行。
+- 目标：Bundle ID 为 com.openai.codex 的本机桌面应用。
+- 草稿：去掉首尾空白后必须恰好为「继续」。
+- 发送：每个目标每轮最多尝试一次；结果不确定时不重发。
+- 预约：默认目标规则，当前不支持在预约中指定标题；需保持终端和桌面可用。
+- 验证：Intel 有历史真实发送记录；ARM64 编译通过，Apple Silicon 真机仍待验证。
+- 许可证：MIT。
+- 归属：社区项目，与 OpenAI 无隶属关系。
+
+## 主要文档
+
+- [使用说明](https://github.com/congcong-ai/codex-continue-automation/blob/main/README.md)：安装、权限、预约、命令、常见问题。
+- [验证状态](https://github.com/congcong-ai/codex-continue-automation/blob/main/docs/verification.md)：已有证据、兼容性边界与人工验收。
+- [贡献指南](https://github.com/congcong-ai/codex-continue-automation/blob/main/CONTRIBUTING.md)：开发验证和日志脱敏。
+- [MIT 许可证](https://github.com/congcong-ai/codex-continue-automation/blob/main/LICENSE)：许可条款及标准原文链接。
+
+本工具不调用 Codex CLI 或 OpenAI API；不提供循环重试、额度绕过或锁屏后台运行保证。成功日志只确认界面历史变化，不独立证明服务器接收。

@@ -1,0 +1,624 @@
+{
+  "role": "AXGroup",
+  "title": "对话",
+  "value": "",
+  "sub": "AXLandmarkRegion",
+  "children": [
+    {
+      "role": "AXGroup",
+      "title": "",
+      "value": "",
+      "sub": "",
+      "children": [
+        {
+          "role": "AXGroup",
+          "title": "",
+          "value": "",
+          "sub": "",
+          "children": [
+            {
+              "role": "AXGroup",
+              "title": "",
+              "value": "",
+              "sub": "",
+              "children": [
+                {
+                  "role": "AXSplitter",
+                  "title": "今天 7:57",
+                  "value": "",
+                  "sub": "",
+                  "children": []
+                },
+                {
+                  "role": "AXHeading",
+                  "title": "你说：",
+                  "value": "4",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXStaticText",
+                      "title": "",
+                      "value": "你说：",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXGroup",
+                      "title": "",
+                      "value": "",
+                      "sub": "",
+                      "children": [
+                        {
+                          "role": "AXGroup",
+                          "title": "",
+                          "value": "",
+                          "sub": "",
+                          "children": [
+                            {
+                              "role": "AXStaticText",
+                              "title": "",
+                              "value": "你好",
+                              "sub": "",
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "role": "AXStaticText",
+                  "title": "",
+                  "value": "7:57",
+                  "sub": "",
+                  "children": []
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXButton",
+                      "title": "复制消息",
+                      "value": "",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXButton",
+                      "title": "编辑消息",
+                      "value": "",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXButton",
+                      "title": "用时 1分钟 50秒",
+                      "value": "",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXHeading",
+                  "title": "ChatGPT 说：",
+                  "value": "4",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXStaticText",
+                      "title": "",
+                      "value": "ChatGPT 说：",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "AXApplicationStatus",
+                  "children": []
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXStaticText",
+                      "title": "",
+                      "value": "你好！今天想一起处理什么？",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXButton",
+                      "title": "复制",
+                      "value": "",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXCheckBox",
+                      "title": "朗读",
+                      "value": "0",
+                      "sub": "AXToggleButton",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXButton",
+                      "title": "评价回复",
+                      "value": "",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXPopUpButton",
+                  "title": "更多操作",
+                  "value": "",
+                  "sub": "",
+                  "children": []
+                },
+                {
+                  "role": "AXStaticText",
+                  "title": "",
+                  "value": "7:58",
+                  "sub": "",
+                  "children": []
+                },
+                {
+                  "role": "AXSplitter",
+                  "title": "今天 12:27",
+                  "value": "",
+                  "sub": "",
+                  "children": []
+                },
+                {
+                  "role": "AXHeading",
+                  "title": "你说：",
+                  "value": "4",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXStaticText",
+                      "title": "",
+                      "value": "你说：",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXGroup",
+                      "title": "",
+                      "value": "",
+                      "sub": "",
+                      "children": [
+                        {
+                          "role": "AXGroup",
+                          "title": "",
+                          "value": "",
+                          "sub": "",
+                          "children": [
+                            {
+                              "role": "AXStaticText",
+                              "title": "",
+                              "value": "继续",
+                              "sub": "",
+                              "children": []
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "role": "AXStaticText",
+                  "title": "",
+                  "value": "12:27",
+                  "sub": "",
+                  "children": []
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXButton",
+                      "title": "复制消息",
+                      "value": "",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXButton",
+                      "title": "编辑消息",
+                      "value": "",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXHeading",
+                  "title": "ChatGPT 说：",
+                  "value": "4",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXStaticText",
+                      "title": "",
+                      "value": "ChatGPT 说：",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "AXApplicationStatus",
+                  "children": []
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXStaticText",
+                      "title": "",
+                      "value": "你想继续哪件事？把要继续的内容发我，或告诉我相关项目/聊天。",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXButton",
+                      "title": "复制",
+                      "value": "",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXCheckBox",
+                      "title": "朗读",
+                      "value": "0",
+                      "sub": "AXToggleButton",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXButton",
+                      "title": "评价回复",
+                      "value": "",
+                      "sub": "",
+                      "children": []
+                    }
+                  ]
+                },
+                {
+                  "role": "AXPopUpButton",
+                  "title": "更多操作",
+                  "value": "",
+                  "sub": "",
+                  "children": []
+                },
+                {
+                  "role": "AXStaticText",
+                  "title": "",
+                  "value": "12:27",
+                  "sub": "",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "role": "AXGroup",
+      "title": "",
+      "value": "",
+      "sub": "",
+      "children": [
+        {
+          "role": "AXGroup",
+          "title": "",
+          "value": "",
+          "sub": "",
+          "children": [
+            {
+              "role": "AXGroup",
+              "title": "",
+              "value": "",
+              "sub": "AXEmptyGroup",
+              "children": []
+            },
+            {
+              "role": "AXHeading",
+              "title": "最新一条回复",
+              "value": "4",
+              "sub": "",
+              "children": [
+                {
+                  "role": "AXStaticText",
+                  "title": "",
+                  "value": "最新一条回复",
+                  "sub": "",
+                  "children": []
+                }
+              ]
+            },
+            {
+              "role": "AXGroup",
+              "title": "",
+              "value": "",
+              "sub": "AXApplicationStatus",
+              "children": []
+            },
+            {
+              "role": "AXGroup",
+              "title": "",
+              "value": "",
+              "sub": "",
+              "children": [
+                {
+                  "role": "AXGroup",
+                  "title": "",
+                  "value": "",
+                  "sub": "",
+                  "children": [
+                    {
+                      "role": "AXGroup",
+                      "title": "",
+                      "value": "",
+                      "sub": "",
+                      "children": [
+                        {
+                          "role": "AXGroup",
+                          "title": "",
+                          "value": "",
+                          "sub": "",
+                          "children": [
+                            {
+                              "role": "AXTextArea",
+                              "title": "和 Codex 一起工作",
+                              "value": "和 Codex 一起工作",
+                              "sub": "",
+                              "children": [
+                                {
+                                  "role": "AXGroup",
+                                  "title": "",
+                                  "value": "",
+                                  "sub": "",
+                                  "children": [
+                                    {
+                                      "role": "AXGroup",
+                                      "title": "",
+                                      "value": "",
+                                      "sub": "",
+                                      "children": [
+                                        {
+                                          "role": "AXStaticText",
+                                          "title": "",
+                                          "value": "和 Codex 一起工作",
+                                          "sub": "",
+                                          "children": []
+                                        }
+                                      ]
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "role": "AXGroup",
+                              "title": "",
+                              "value": "",
+                              "sub": "",
+                              "children": [
+                                {
+                                  "role": "AXButton",
+                                  "title": "添加文件等内容",
+                                  "value": "",
+                                  "sub": "",
+                                  "children": []
+                                }
+                              ]
+                            },
+                            {
+                              "role": "AXPopUpButton",
+                              "title": "更改权限",
+                              "value": "",
+                              "sub": "",
+                              "children": [
+                                {
+                                  "role": "AXImage",
+                                  "title": "",
+                                  "value": "",
+                                  "sub": "",
+                                  "children": []
+                                },
+                                {
+                                  "role": "AXGroup",
+                                  "title": "",
+                                  "value": "",
+                                  "sub": "",
+                                  "children": [
+                                    {
+                                      "role": "AXStaticText",
+                                      "title": "",
+                                      "value": "完全访问",
+                                      "sub": "",
+                                      "children": []
+                                    }
+                                  ]
+                                }
+                              ]
+                            },
+                            {
+                              "role": "AXImage",
+                              "title": "上下文用量：14%",
+                              "value": "",
+                              "sub": "",
+                              "children": []
+                            },
+                            {
+                              "role": "AXGroup",
+                              "title": "",
+                              "value": "",
+                              "sub": "",
+                              "children": [
+                                {
+                                  "role": "AXPopUpButton",
+                                  "title": "GPT-6 Luna 轻度",
+                                  "value": "",
+                                  "sub": "",
+                                  "children": []
+                                }
+                              ]
+                            },
+                            {
+                              "role": "AXGroup",
+                              "title": "",
+                              "value": "",
+                              "sub": "",
+                              "children": [
+                                {
+                                  "role": "AXButton",
+                                  "title": "听写",
+                                  "value": "",
+                                  "sub": "",
+                                  "children": []
+                                }
+                              ]
+                            },
+                            {
+                              "role": "AXGroup",
+                              "title": "",
+                              "value": "",
+                              "sub": "",
+                              "children": [
+                                {
+                                  "role": "AXButton",
+                                  "title": "开启语音聊天",
+                                  "value": "",
+                                  "sub": "",
+                                  "children": []
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
