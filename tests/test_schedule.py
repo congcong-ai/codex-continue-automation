@@ -121,8 +121,9 @@ class PreflightTests(unittest.TestCase):
         ])
         self.assertEqual(result,(0,['目标甲']))
         self.assertIn('可预约目标 1 个',output)
-        self.assertIn('不参与本次预约',output)
-        self.assertIn('输入框只写「继续」',output)
+        self.assertNotIn('不参与本次预约',output)
+        self.assertNotIn('目标乙',output)
+        self.assertNotIn('composer 草稿不是恰好为继续',output)
 
     def test_permissions_failure_explains_actual_terminal(self):
         from unittest.mock import patch
@@ -133,9 +134,29 @@ class PreflightTests(unittest.TestCase):
         self.assertIn('预约未建立',output)
 
     def test_zero_eligible_targets_blocks_scheduling(self):
-        result,output,_=self.check([{'事件':'跳过','会话':'目标甲','原因':'发送按钮不可用'}],code=3)
+        result,output,_=self.check([{'事件':'跳过','会话':'目标甲','原因':'composer 草稿不是恰好为继续'}],code=3)
         self.assertEqual(result,(3,[]))
-        self.assertIn('等当前任务结束',output)
+        self.assertIn('没有可预约目标',output)
+        self.assertNotIn('目标甲',output)
+
+    def test_other_failures_remain_visible(self):
+        result,output,_=self.check([
+            {'事件':'跳过','会话':'异常目标','原因':'切换后会话身份不符，禁止操作'},
+            {'事件':'返回启动应用','成功':False},
+        ],code=3)
+        self.assertEqual(result,(3,[]))
+        self.assertIn('异常目标',output)
+        self.assertIn('切换后会话身份不符',output)
+        self.assertIn('请手动切回终端',output)
+
+    def test_disabled_send_button_still_allows_scheduling(self):
+        result,output,_=self.check([
+            {'事件':'目标识别通过，未发送','会话':'额度耗尽目标','发送按钮可用':False},
+        ])
+        self.assertEqual(result,(0,['额度耗尽目标']))
+        self.assertIn('发送按钮暂不可用，仍允许预约',output)
+        self.assertIn('恢复可用后才发送',output)
+        self.assertNotIn('预约未建立',output)
 
     def test_success_exit_without_evidence_is_rejected(self):
         result,_,_=self.check([])

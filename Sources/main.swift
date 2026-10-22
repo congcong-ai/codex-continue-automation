@@ -112,7 +112,7 @@ func identity(_ root:Node)throws->String {
  return title
 }
 struct Ready {let input:Node;let button:Node;let scope:Node}
-func ready(_ root:Node)throws->Ready {
+func ready(_ root:Node,allowDisabledSend:Bool = false)throws->Ready {
  let mains=root.all.filter{$0.sub=="AXLandmarkMain"};guard mains.count==1 else{throw Failure("主内容区域不唯一")}
  let main=mains[0]
  let input=try one(main.all.filter{$0.role=="AXTextArea" && composerNames.contains($0.title)},"消息 composer 不唯一")
@@ -124,7 +124,7 @@ func ready(_ root:Node)throws->Ready {
  guard !scope.all.contains(where:{$0.role=="AXButton" && stopNames.contains($0.title)}) else{throw Failure("会话正在执行或显示排队按钮")}
  guard scope.all.filter({$0.role=="AXTextArea"}).count==1 else{throw Failure("发送区域有多个文本框")}
  let button=try one(scope.all.filter{$0.role=="AXButton" && sendNames.contains($0.title)},"发送按钮不唯一")
- guard button.enabled else{throw Failure("发送按钮不可用")}
+ guard allowDisabledSend || button.enabled else{throw Failure("发送按钮不可用")}
  return Ready(input:input,button:button,scope:scope)
 }
 // 只数“你说”消息块里恰好为继续的正文；绝不扫描侧边栏或 composer。
@@ -210,6 +210,12 @@ func selfTest()throws {
  let main=Node("AXGroup",sub:"AXLandmarkMain",children:[scope])
  let page=Node("AXWindow",children:[main])
  try check(try ready(page).input === input,"正确 composer 和发送按钮")
+ let disabledSend=Node("AXButton","发送",enabled:false)
+ let waitingPage=Node("AXWindow",children:[Node("AXGroup",sub:"AXLandmarkMain",children:[Node("AXGroup",children:[Node("AXTextArea","和 Codex 一起工作","继续"),disabledSend])])])
+ try check(try ready(waitingPage,allowDisabledSend:true).button === disabledSend,"预约允许发送按钮因额度暂时禁用")
+ do{_=try ready(waitingPage);throw Failure("测试失败：禁用发送按钮")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败"),"正式执行及普通测试仍拒绝禁用发送按钮")}
+ let invalidWaitingPage=Node("AXWindow",children:[Node("AXGroup",sub:"AXLandmarkMain",children:[Node("AXGroup",children:[Node("AXTextArea","和 Codex 一起工作","其它草稿"),Node("AXButton","发送",enabled:false)])])])
+ do{_=try ready(invalidWaitingPage,allowDisabledSend:true);throw Failure("测试失败：预约其它草稿")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败"),"放宽发送按钮不放宽预约草稿要求")}
  scope.children.append(Node("AXButton","排队"))
  do{_=try ready(page);throw Failure("测试失败：运行状态")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败"),"运行中禁止发送")}
  scope.children.removeLast();input.parent=scope
@@ -294,10 +300,11 @@ let schedulingPreflight=rawArgs == ["--preflight"]
 let inspectPreflight=rawArgs == ["--preflight-inspect"]
 let isPreflight=schedulingPreflight || inspectPreflight
 let args=schedulingPreflight ? ["--test"] : (inspectPreflight ? ["--inspect"]:rawArgs)
-do {
- if args==["--self-test"]{try selfTest();exit(0)}
+func run()throws->Int32 {
+ let launchingApp=NSWorkspace.shared.frontmostApplication
+ if args==["--self-test"]{try selfTest();return 0}
  if args==["--check-permissions"] || args==["--request-permissions"] {
-  try checkAccessibilityPermission(prompt:args==["--request-permissions"]);exit(0)
+  try checkAccessibilityPermission(prompt:args==["--request-permissions"]);return 0
  }
  let allowed:Set<String>=["--inspect","--test","--run-now","--current-only","--expect-title","--pinned-title","--self-test"]
  for (i,arg) in args.enumerated() where !(i>0 && ["--expect-title","--pinned-title"].contains(args[i-1])) {guard allowed.contains(arg) else{throw Failure("未知参数：\(arg)")}}
@@ -331,6 +338,22 @@ do {
  let app=apps[0];let ax=AXUIElementCreateApplication(app.processIdentifier);AXUIElementSetMessagingTimeout(ax,1)
  _=AXUIElementSetAttributeValue(ax,"AXManualAccessibility" as CFString,kCFBooleanTrue)
  _=AXUIElementSetAttributeValue(ax,"AXEnhancedUserInterface" as CFString,kCFBooleanTrue)
+ // 在切换到 Codex 前记录启动应用；正常返回及抛错都会执行恢复。
+ defer {
+  // 命令行进程没有常驻事件循环，先处理工作区通知，避免读到切换前的缓存。
+  RunLoop.current.run(until:Date(timeIntervalSinceNow:0.05))
+  if schedulingPreflight,let caller=launchingApp,caller.processIdentifier != app.processIdentifier,
+     !caller.isTerminated,NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier {
+   _=caller.activate()
+   for _ in 0..<10 {
+    if NSWorkspace.shared.frontmostApplication?.processIdentifier==caller.processIdentifier{break}
+    RunLoop.current.run(until:Date(timeIntervalSinceNow:0.1))
+   }
+   let restored=NSWorkspace.shared.frontmostApplication?.processIdentifier==caller.processIdentifier
+   log("返回启动应用",["成功":restored,"应用":caller.localizedName ?? "启动终端"])
+  }
+ }
+ if schedulingPreflight {log("启动应用",["标识":launchingApp?.bundleIdentifier ?? "未知"])}
  if !args.contains("--inspect"){app.activate()}
  Thread.sleep(forTimeInterval:1)
  var windows:[AXUIElement]=[]
@@ -393,13 +416,13 @@ do {
    log("只读用户消息核验",["会话":expected,"用户继续消息数":userMessages(full),"说明":"未执行发送动作"])
   }
   for n in diagnostic.all where n.role=="AXTextArea"{log("输入框",["标签":n.title,"恰好继续":exact(n.value),"可用":n.enabled,"字符数":n.value.count])}
-  exit(0)
+  return 0
  }
  let targets:[String]
  if !pinnedTitles.isEmpty {
   targets=try limitedTargets(pinnedTitles,p)
  }else if current || !p.reliable {
-  do {let id=try identity(initial);guard expected == nil || expected==id else{throw Failure("当前会话不符合测试限定标题")};targets=[id]}catch{log("当前活动会话无法可靠识别",["原因":"\(error)"]);exit(2)}
+  do {let id=try identity(initial);guard expected == nil || expected==id else{throw Failure("当前会话不符合测试限定标题")};targets=[id]}catch{log("当前活动会话无法可靠识别",["原因":"\(error)"]);return 2}
  }else{targets=p.rows.map{$0.title}}
  var attempted=Set<String>()
  var checkedCount=0;var confirmedCount=0;var uncertainCount=0;var skippedCount=0
@@ -422,7 +445,8 @@ do {
    guard try identity(page)==title else{throw Failure("切换后会话身份不符，禁止操作")}
    page=try get()
    guard try identity(page)==title else{throw Failure("加载完整目标后身份发生变化")}
-   do{_=try ready(page)}catch{
+   let checkedReady:Ready
+   do{checkedReady=try ready(page,allowDisabledSend:schedulingPreflight)}catch{
     log("目标输入框诊断",["会话":title,"输入框":page.all.filter{["AXTextArea","AXTextField"].contains($0.role)}.map{["标签":$0.title,"恰好继续":exact($0.value),"字符数":$0.value.count] as [String:Any]},"主区域数":page.all.filter{$0.sub=="AXLandmarkMain"}.count])
     throw error
    }
@@ -433,7 +457,7 @@ do {
    }
    let diagnosticBaseline=userMessages(page)
    guard diagnosticBaseline>=0 else{throw Failure("无法建立用户消息基线，未发送；请检查用户消息正文是否可读或包含未知控件")}
-   if args.contains("--test"){checkedCount+=1;log("目标识别通过，未发送",["会话":title,"用户继续消息基线":diagnosticBaseline]);continue}
+   if args.contains("--test"){checkedCount+=1;log("目标识别通过，未发送",["会话":title,"用户继续消息基线":diagnosticBaseline,"发送按钮可用":checkedReady.button.enabled]);continue}
    guard NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier else{throw Failure("Codex 不在前台；为避免抢焦点未发送")}
    // 重建树并重新验证，绝不依赖之前保存的输入框或按钮。
    page=try get();guard try identity(page)==title else{throw Failure("提交前会话发生变化")}
@@ -465,7 +489,8 @@ do {
  }
  let outcome = args.contains("--test") ? (checkedCount>0 ? "只读预检通过":"没有目标通过预检") : (attempted.isEmpty ? "未提交任何消息" : (uncertainCount>0 ? "存在不确定结果，请人工核对，勿重发":"已确认新增界面历史消息"))
  log("一次执行结束",["已尝试数":attempted.count,"已确认提交数":confirmedCount,"不确定数":uncertainCount,"跳过数":skippedCount,"预检通过数":checkedCount,"结果":outcome])
- if args.contains("--test") {exit(checkedCount>0 ? 0:3)}
- exit(attempted.isEmpty ? 3:(uncertainCount>0 ? 4:0))
-} catch {log("失败",["原因":"\(error)"]);exit(2)}
+ if args.contains("--test") {return checkedCount>0 ? 0:3}
+ return attempted.isEmpty ? 3:(uncertainCount>0 ? 4:0)
+}
+do {exit(try run())} catch {log("失败",["原因":"\(error)"]);exit(2)}
 extension ProcessInfo {var machineArchitecture:String {var info=utsname();uname(&info);return withUnsafePointer(to:&info.machine){$0.withMemoryRebound(to:CChar.self,capacity:1){String(cString:$0)}}}}

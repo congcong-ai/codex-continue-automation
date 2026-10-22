@@ -122,11 +122,17 @@ def preflight(inspect=False):
             title = record.get('会话')
             if isinstance(title, str) and title and title not in targets:
                 targets.append(title)
-            print(f"[可预约] {title}\n  目标身份、继续草稿、发送按钮、运行状态及消息历史校验通过。", flush=True)
+            print(f"[可预约] {title}\n  目标身份、继续草稿、发送区域、运行状态及消息历史校验通过。", flush=True)
+            if record.get('发送按钮可用') is False:
+                print('  发送按钮暂不可用，仍允许预约；到时会重新检查，恢复可用后才发送。', flush=True)
         elif event in ('跳过', '失败'):
             reason = str(record.get('原因', '未知原因'))
+            if event == '跳过' and reason == 'composer 草稿不是恰好为继续':
+                continue
             label = '不参与本次预约' if event == '跳过' else '未通过'
             print(f"[{label}] {record.get('会话', '启动检查')}\n  原因：{reason}\n  处理：{recovery_hint(reason)}", flush=True)
+        elif event == '返回启动应用' and record.get('成功') is False:
+            print('[提示] 无法自动返回启动终端，请手动切回终端查看检查结果。', flush=True)
         elif inspect and event == '当前活动会话':
             print(f"[通过] 当前只读目标：{record.get('标题')}", flush=True)
     # 启动检查日志保存在本地；不要求用户从原始 JSON 中自行定位错误。
@@ -137,6 +143,8 @@ def preflight(inspect=False):
               and (bool(targets) if not inspect else any(row.get('项目') == '只读诊断目标' for row in records)))
     if not passed:
         code = result.returncode if result.returncode != 0 else 2
+        if not inspect and code == 3 and not targets:
+            print('[提示] 没有可预约目标。请在需要继续的置顶会话中填好「继续」，不要发送，再重新运行。', flush=True)
         log('预约未建立', 原因='启动检查未通过；请按上方提示处理后重新运行，不会等待或发送消息',
             返回码=code, 检查日志=str(directory/'preflight.log'))
         return code, []
