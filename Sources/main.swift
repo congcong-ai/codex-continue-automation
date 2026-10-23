@@ -18,6 +18,15 @@ func log(_ event:String,_ info:[String:Any] = [:]) {
 }
 struct Failure:Error,CustomStringConvertible {let description:String;init(_ s:String){description=s}}
 func read(_ e:AXUIElement,_ key:String)->CFTypeRef? {var v:CFTypeRef?;return AXUIElementCopyAttributeValue(e,key as CFString,&v) == .success ? v:nil}
+// NSWorkspace 在没有常驻事件循环的 CLI 中可能缓存切换前的应用。
+// 所有安全判断都直接查询系统 AX 焦点；读取失败时返回 nil，禁止猜测。
+func frontmostApplication()->NSRunningApplication? {
+ guard let focused=read(AXUIElementCreateSystemWide(),kAXFocusedApplicationAttribute as String),
+       CFGetTypeID(focused)==AXUIElementGetTypeID() else{return nil}
+ var pid:pid_t = 0
+ guard AXUIElementGetPid(focused as! AXUIElement,&pid) == .success,pid>0 else{return nil}
+ return NSRunningApplication(processIdentifier:pid)
+}
 final class Node {
  let e:AXUIElement?;let role:String;let title:String;let value:String;let sub:String;let enabled:Bool;var children:[Node];weak var parent:Node?
  init(_ role:String,_ title:String="",_ value:String="",sub:String="",enabled:Bool=true,children:[Node]=[],e:AXUIElement?=nil){self.role=role;self.title=title;self.value=value;self.sub=sub;self.enabled=enabled;self.children=children;self.e=e;for c in children{c.parent=self}}
@@ -301,6 +310,8 @@ let inspectPreflight=rawArgs == ["--preflight-inspect"]
 let isPreflight=schedulingPreflight || inspectPreflight
 let args=schedulingPreflight ? ["--test"] : (inspectPreflight ? ["--inspect"]:rawArgs)
 func run()throws->Int32 {
+ // 这是进程启动后的首次查询，尚未切换应用；系统 AX 初始化前可能读不到焦点。
+ // 仅用它记录返回目标，切换后的安全判断一律使用实时 AX 查询。
  let launchingApp=NSWorkspace.shared.frontmostApplication
  if args==["--self-test"]{try selfTest();return 0}
  if args==["--check-permissions"] || args==["--request-permissions"] {
@@ -340,22 +351,23 @@ func run()throws->Int32 {
  _=AXUIElementSetAttributeValue(ax,"AXEnhancedUserInterface" as CFString,kCFBooleanTrue)
  // 在切换到 Codex 前记录启动应用；正常返回及抛错都会执行恢复。
  defer {
-  // 命令行进程没有常驻事件循环，先处理工作区通知，避免读到切换前的缓存。
-  RunLoop.current.run(until:Date(timeIntervalSinceNow:0.05))
   if schedulingPreflight,let caller=launchingApp,caller.processIdentifier != app.processIdentifier,
-     !caller.isTerminated,NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier {
+     !caller.isTerminated,frontmostApplication()?.processIdentifier==app.processIdentifier {
    _=caller.activate()
    for _ in 0..<10 {
-    if NSWorkspace.shared.frontmostApplication?.processIdentifier==caller.processIdentifier{break}
+    if frontmostApplication()?.processIdentifier==caller.processIdentifier{break}
     RunLoop.current.run(until:Date(timeIntervalSinceNow:0.1))
    }
-   let restored=NSWorkspace.shared.frontmostApplication?.processIdentifier==caller.processIdentifier
+   let restored=frontmostApplication()?.processIdentifier==caller.processIdentifier
    log("返回启动应用",["成功":restored,"应用":caller.localizedName ?? "启动终端"])
   }
  }
  if schedulingPreflight {log("启动应用",["标识":launchingApp?.bundleIdentifier ?? "未知"])}
  if !args.contains("--inspect"){app.activate()}
  Thread.sleep(forTimeInterval:1)
+ if !args.contains("--inspect"),frontmostApplication()?.processIdentifier != app.processIdentifier {
+  throw Failure("无法确认 Codex 已切换到前台，请关闭遮挡窗口后重试")
+ }
  var windows:[AXUIElement]=[]
  for attempt in 0..<3 {
   windows=(read(ax,"AXChildren") as? [AXUIElement] ?? []).filter{read($0,"AXRole") as? String == "AXWindow"}
@@ -381,7 +393,7 @@ func run()throws->Int32 {
   guard !args.contains("--inspect") else{return page}
   return try revealSidebar(page,capture:{try capture(history)},perform:{button in
    try requireInteractiveDesktop()
-   guard NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier,
+   guard frontmostApplication()?.processIdentifier==app.processIdentifier,
          let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window) else{throw Failure("展开侧边栏前焦点窗口改变，请保持 Codex 在前台后重试")}
    try press(button)
    log("自动展开侧边栏",["说明":"已点击顶部显示侧边栏，等待固定侧栏加载；未发送消息"])
@@ -452,20 +464,20 @@ func run()throws->Int32 {
    }
    if schedulingPreflight {
     try requireInteractiveDesktop()
-    guard NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier,
+    guard frontmostApplication()?.processIdentifier==app.processIdentifier,
           let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window) else{throw Failure("检查期间前台应用或焦点窗口改变，请保持 Codex 在前台后重试")}
    }
    let diagnosticBaseline=userMessages(page)
    guard diagnosticBaseline>=0 else{throw Failure("无法建立用户消息基线，未发送；请检查用户消息正文是否可读或包含未知控件")}
    if args.contains("--test"){checkedCount+=1;log("目标识别通过，未发送",["会话":title,"用户继续消息基线":diagnosticBaseline,"发送按钮可用":checkedReady.button.enabled]);continue}
-   guard NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier else{throw Failure("Codex 不在前台；为避免抢焦点未发送")}
+   guard frontmostApplication()?.processIdentifier==app.processIdentifier else{throw Failure("Codex 不在前台；为避免抢焦点未发送")}
    // 重建树并重新验证，绝不依赖之前保存的输入框或按钮。
    page=try get();guard try identity(page)==title else{throw Failure("提交前会话发生变化")}
    try requireInteractiveDesktop()
    let r=try ready(page);let before=userMessages(page)
    guard before>=0 else{throw Failure("无法建立用户消息基线，未发送")}
    guard !attempted.contains(title) else{throw Failure("本次运行已经尝试过此会话")}
-   guard NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier,
+   guard frontmostApplication()?.processIdentifier==app.processIdentifier,
          let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window),
          let input=r.input.e,exact(read(input,"AXValue") as? String ?? ""),let b=r.button.e,(read(b,"AXEnabled") as? Bool)==true,read(window,"AXTitle") as? String==title else{throw Failure("提交前最后检查失败")}
    attempted.insert(title)
@@ -481,7 +493,7 @@ func run()throws->Int32 {
    if !confirmed{uncertainCount+=1;log("结果不确定，不重发",["会话":title,"原因":"未确认新增用户消息；输入框清空不能独立证明成功"])}
   } catch {skippedCount+=1;log("跳过",["会话":title,"原因":"\(error)"])}
  }
- if isPreflight,let original=originalTitle,NSWorkspace.shared.frontmostApplication?.processIdentifier==app.processIdentifier,
+ if isPreflight,let original=originalTitle,frontmostApplication()?.processIdentifier==app.processIdentifier,
     let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window),
     let page=try? get(false),(try? identity(page)) != original {
   let originalRows=sidebars(page).flatMap{$0.all}.filter{$0.role == "AXButton" && $0.title==original}
