@@ -138,6 +138,9 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(result,(3,[]))
         self.assertIn('没有可预约目标',output)
         self.assertNotIn('目标甲',output)
+        self.assertIn('已检查 1 个会话，均未检测到',output)
+        self.assertIn('聊天历史中的「继续」不算草稿',output)
+        self.assertNotIn('启动检查未通过',output)
 
     def test_other_failures_remain_visible(self):
         result,output,_=self.check([
@@ -148,6 +151,8 @@ class PreflightTests(unittest.TestCase):
         self.assertIn('异常目标',output)
         self.assertIn('切换后会话身份不符',output)
         self.assertIn('请手动切回终端',output)
+        self.assertIn('请先处理上方异常',output)
+        self.assertNotIn('均未检测到',output)
 
     def test_disabled_send_button_still_allows_scheduling(self):
         result,output,_=self.check([

@@ -143,9 +143,17 @@ def preflight(inspect=False):
               and (bool(targets) if not inspect else any(row.get('项目') == '只读诊断目标' for row in records)))
     if not passed:
         code = result.returncode if result.returncode != 0 else 2
+        reason = '启动检查未通过；请按上方提示处理后重新运行，不会等待或发送消息'
         if not inspect and code == 3 and not targets:
-            print('[提示] 没有可预约目标。请在需要继续的置顶会话中填好「继续」，不要发送，再重新运行。', flush=True)
-        log('预约未建立', 原因='启动检查未通过；请按上方提示处理后重新运行，不会等待或发送消息',
+            skipped = [row for row in records if row.get('事件') == '跳过']
+            missing_drafts = sum(row.get('原因') == 'composer 草稿不是恰好为继续' for row in skipped)
+            if skipped and missing_drafts == len(skipped):
+                reason = f'已检查 {missing_drafts} 个会话，均未检测到恰好为「继续」的未发送草稿；未建立预约'
+                print(f'[提示] 没有可预约目标。{reason}。', flush=True)
+                print('请在目标置顶会话底部的输入框中填写「继续」，保留在输入框里，不要点击发送，然后重新运行。聊天历史中的「继续」不算草稿。', flush=True)
+            else:
+                print('[提示] 没有可预约目标，请先处理上方异常。需要参与预约的会话还须预填「继续」，不要发送。', flush=True)
+        log('预约未建立', 原因=reason,
             返回码=code, 检查日志=str(directory/'preflight.log'))
         return code, []
     if inspect:

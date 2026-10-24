@@ -136,6 +136,20 @@ func ready(_ root:Node,allowDisabledSend:Bool = false)throws->Ready {
  guard allowDisabledSend || button.enabled else{throw Failure("发送按钮不可用")}
  return Ready(input:input,button:button,scope:scope)
 }
+// 标题先更新不代表该会话的草稿与发送区域已经恢复。有限重读，不写入草稿。
+func waitForReadyTarget(_ title:String,initial:Node,allowDisabledSend:Bool = false,
+                        capture:()throws->Node,wait:(TimeInterval)->Void = {Thread.sleep(forTimeInterval:$0)})throws->Ready {
+ var page=initial
+ let delays:[TimeInterval]=[0.25,0.5,1]
+ for attempt in 0...delays.count {
+  guard try identity(page)==title else{throw Failure("等待输入框恢复期间会话身份改变，禁止操作")}
+  do{return try ready(page,allowDisabledSend:allowDisabledSend)}catch{
+   if attempt==delays.count {throw error}
+  }
+  wait(delays[attempt]);page=try capture()
+ }
+ throw Failure("输入框未能在等待期限内恢复")
+}
 // 只数“你说”消息块里恰好为继续的正文；绝不扫描侧边栏或 composer。
 func userMessages(_ root:Node)->Int {
  let regions=root.all.filter{$0.sub=="AXLandmarkRegion" && ["对话","Conversation"].contains($0.title)}
@@ -219,6 +233,19 @@ func selfTest()throws {
  let main=Node("AXGroup",sub:"AXLandmarkMain",children:[scope])
  let page=Node("AXWindow",children:[main])
  try check(try ready(page).input === input,"正确 composer 和发送按钮")
+ func loadingPage(_ draft:String,_ title:String="等待测试")->Node {
+  Node("AXWindow",title,children:[Node("AXToolbar","聊天工具栏",children:[Node("AXStaticText","",title)]),Node("AXGroup",sub:"AXLandmarkComplementary",children:[Node("AXGroup","应用导航",sub:"AXLandmarkNavigation"),Node("AXButton",title)]),Node("AXGroup",sub:"AXLandmarkMain",children:[Node("AXGroup",children:[Node("AXTextArea","和 Codex 一起工作",draft),Node("AXButton","发送")])])])
+ }
+ let loading=loadingPage("和 Codex 一起工作\n");let loaded=loadingPage("继续")
+ var reads=0
+ let restored=try waitForReadyTarget("等待测试",initial:loading,capture:{reads+=1;return reads<2 ? loading:loaded},wait:{_ in})
+ try check(exact(restored.input.value) && reads==2,"标题已匹配后等待占位输入框恢复为真实继续草稿")
+ _=try waitForReadyTarget("等待测试",initial:loaded,capture:{throw Failure("不应重读已就绪输入框")},wait:{_ in})
+ try check(true,"已就绪草稿不引入额外等待")
+ reads=0
+ do{_=try waitForReadyTarget("等待测试",initial:loading,capture:{reads+=1;return loadingPage("继续","其它会话")},wait:{_ in});throw Failure("测试失败：等待中身份变化")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败") && reads==1,"等待期间切换到其它会话时拒绝误用其继续草稿")}
+ reads=0
+ do{_=try waitForReadyTarget("等待测试",initial:loading,capture:{reads+=1;return loading},wait:{_ in});throw Failure("测试失败：占位提示超时")}catch let e as Failure{try check(e.description=="composer 草稿不是恰好为继续" && reads==3,"占位提示未恢复时有限重读后仍拒绝发送")}
  let disabledSend=Node("AXButton","发送",enabled:false)
  let waitingPage=Node("AXWindow",children:[Node("AXGroup",sub:"AXLandmarkMain",children:[Node("AXGroup",children:[Node("AXTextArea","和 Codex 一起工作","继续"),disabledSend])])])
  try check(try ready(waitingPage,allowDisabledSend:true).button === disabledSend,"预约允许发送按钮因额度暂时禁用")
@@ -458,7 +485,7 @@ func run()throws->Int32 {
    page=try get()
    guard try identity(page)==title else{throw Failure("加载完整目标后身份发生变化")}
    let checkedReady:Ready
-   do{checkedReady=try ready(page,allowDisabledSend:schedulingPreflight)}catch{
+   do{checkedReady=try waitForReadyTarget(title,initial:page,allowDisabledSend:schedulingPreflight,capture:{page=try get();return page})}catch{
     log("目标输入框诊断",["会话":title,"输入框":page.all.filter{["AXTextArea","AXTextField"].contains($0.role)}.map{["标签":$0.title,"恰好继续":exact($0.value),"字符数":$0.value.count] as [String:Any]},"主区域数":page.all.filter{$0.sub=="AXLandmarkMain"}.count])
     throw error
    }
