@@ -9,22 +9,67 @@ class ScheduleTests(unittest.TestCase):
     now = dt.datetime(2026, 10, 21, 12, 0)
     def test_future(self):
         epoch, rollover = m.parse_time('13:40', self.now)
-        self.assertEqual(dt.datetime.fromtimestamp(epoch), dt.datetime(2026,10,21,13,40))
+        self.assertEqual(dt.datetime.fromtimestamp(epoch, m.BEIJING).replace(tzinfo=None), dt.datetime(2026,10,21,13,40))
         self.assertFalse(rollover)
     def test_rollover(self):
         epoch, rollover = m.parse_time('01:40', self.now)
-        self.assertEqual(dt.datetime.fromtimestamp(epoch),dt.datetime(2026,10,22,1,40))
+        self.assertEqual(dt.datetime.fromtimestamp(epoch, m.BEIJING).replace(tzinfo=None),dt.datetime(2026,10,22,1,40))
         self.assertTrue(rollover)
     def test_full(self):
         epoch, rollover=m.parse_time('2026-10-22 01:40',self.now)
-        self.assertEqual(dt.datetime.fromtimestamp(epoch),dt.datetime(2026,10,22,1,40))
+        self.assertEqual(dt.datetime.fromtimestamp(epoch, m.BEIJING).replace(tzinfo=None),dt.datetime(2026,10,22,1,40))
         self.assertFalse(rollover)
     def test_invalid(self):
         for value in ['2026-10-20 01:40','2026-02-30 01:40','25:00','12:60','继续','2026-10-21 12:00']:
             with self.subTest(value=value), self.assertRaises(ValueError):m.parse_time(value,self.now)
     def test_new_year(self):
         epoch, _=m.parse_time('01:00',dt.datetime(2026,12,31,23,59))
-        self.assertEqual(dt.datetime.fromtimestamp(epoch),dt.datetime(2027,1,1,1))
+        self.assertEqual(dt.datetime.fromtimestamp(epoch, m.BEIJING).replace(tzinfo=None),dt.datetime(2027,1,1,1))
+
+    def test_morning_input_noon_stays_today(self):
+        epoch, rollover=m.parse_time('12:40',dt.datetime(2026,10,25,8,57))
+        self.assertEqual(m.format_beijing(epoch),'2026-10-25 12:40')
+        self.assertFalse(rollover)
+        self.assertEqual(epoch,dt.datetime(2026,10,25,4,40,tzinfo=dt.timezone.utc).timestamp())
+
+    def test_midnight_and_noon_are_twelve_hours_apart(self):
+        now=dt.datetime(2026,10,25,0,10)
+        midnight,rollover=m.parse_time('0:40',now)
+        noon,_=m.parse_time('12:40',now)
+        self.assertFalse(rollover)
+        self.assertEqual(m.format_beijing(midnight),'2026-10-25 00:40')
+        self.assertEqual(noon-midnight,12*60*60)
+
+    def test_timezone_aware_now_is_converted_to_beijing(self):
+        epoch,rollover=m.parse_time('12:40',dt.datetime(2026,10,25,0,57,tzinfo=dt.timezone.utc))
+        self.assertFalse(rollover)
+        self.assertEqual(m.format_beijing(epoch),'2026-10-25 12:40')
+
+    def test_system_timezone_cannot_change_beijing_schedule(self):
+        import os,time
+        from unittest.mock import patch
+        try:
+            for timezone in ['UTC','America/Los_Angeles','Asia/Shanghai']:
+                with self.subTest(timezone=timezone),patch.dict(os.environ,{'TZ':timezone}):
+                    time.tzset()
+                    epoch,rollover=m.parse_time('12:40',dt.datetime(2026,10,25,8,57))
+                    self.assertFalse(rollover)
+                    self.assertEqual(m.format_beijing(epoch),'2026-10-25 12:40')
+        finally:
+            time.tzset()
+
+    def test_log_uses_simple_beijing_time(self):
+        import contextlib,io,json,tempfile
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory(prefix='codex-beijing-log-') as folder:
+            output=io.StringIO()
+            with patch.object(m,'BASE',Path(folder)),contextlib.redirect_stdout(output):
+                m.log('已预约一次执行',输入时间='12:40',预约时间='2026-10-25 12:40（北京时间）')
+            row=json.loads((Path(folder)/'logs/预约.jsonl').read_text())
+            self.assertRegex(row['时间'],r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$')
+            self.assertIn('2026-10-25 12:40（北京时间）',output.getvalue())
+            self.assertNotIn('+08:00',output.getvalue())
+            self.assertNotIn('CST',output.getvalue())
 
 class ExecutionTests(unittest.TestCase):
     def run_main(self, *, inspect=False, late=False, code=0):
