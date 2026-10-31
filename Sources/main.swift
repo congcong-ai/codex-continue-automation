@@ -27,6 +27,21 @@ func frontmostApplication()->NSRunningApplication? {
  guard AXUIElementGetPid(focused as! AXUIElement,&pid) == .success,pid>0 else{return nil}
  return NSRunningApplication(processIdentifier:pid)
 }
+// CLI 在等待期间也处理系统事件，避免激活通知积压。
+func pause(_ seconds:TimeInterval) {RunLoop.current.run(until:Date(timeIntervalSinceNow:seconds))}
+// AX 在窗口切换时可能短暂读不到系统焦点。仅对读取失败有限重读；
+// 一旦确认其它应用在前台，立即拒绝，不通过再次激活抢回焦点。
+func requireFrontmost(_ expected:pid_t,probe:()->pid_t? = {frontmostApplication()?.processIdentifier},
+                      wait:(TimeInterval)->Void = pause)throws {
+ for attempt in 0..<4 {
+  if let actual=probe() {
+   guard actual==expected else{throw Failure("Codex 不在前台；当前前台进程 \(actual)，目标进程 \(expected)；为避免抢焦点未发送")}
+   return
+  }
+  if attempt<3 {wait(0.15)}
+ }
+ throw Failure("系统 AX 前台焦点连续读取失败（已重读 3 次）；未发送，请保持桌面解锁后重试")
+}
 final class Node {
  let e:AXUIElement?;let role:String;let title:String;let value:String;let sub:String;let enabled:Bool;var children:[Node];weak var parent:Node?
  init(_ role:String,_ title:String="",_ value:String="",sub:String="",enabled:Bool=true,children:[Node]=[],e:AXUIElement?=nil){self.role=role;self.title=title;self.value=value;self.sub=sub;self.enabled=enabled;self.children=children;self.e=e;for c in children{c.parent=self}}
@@ -71,7 +86,7 @@ func sidebarRevealButton(_ root:Node)throws->Node? {
  return button
 }
 func revealSidebar(_ initial:Node,capture:()throws->Node,perform:(Node)throws->Void,
-                   wait:()->Void = {Thread.sleep(forTimeInterval:0.25)})throws->Node {
+                   wait:()->Void = {pause(0.25)})throws->Node {
  guard let button=try sidebarRevealButton(initial) else{return initial}
  try perform(button)
  for _ in 0..<8 {
@@ -138,7 +153,7 @@ func ready(_ root:Node,allowDisabledSend:Bool = false)throws->Ready {
 }
 // 标题先更新不代表该会话的草稿与发送区域已经恢复。有限重读，不写入草稿。
 func waitForReadyTarget(_ title:String,initial:Node,allowDisabledSend:Bool = false,
-                        capture:()throws->Node,wait:(TimeInterval)->Void = {Thread.sleep(forTimeInterval:$0)})throws->Ready {
+                        capture:()throws->Node,wait:(TimeInterval)->Void = {pause($0)})throws->Ready {
  var page=initial
  let delays:[TimeInterval]=[0.25,0.5,1]
  for attempt in 0...delays.count {
@@ -187,6 +202,32 @@ func userMessages(_ root:Node)->Int {
 func press(_ n:Node)throws{guard let e=n.e else{throw Failure("元素不存在")};let r=AXUIElementPerformAction(e,kAXPressAction as CFString);guard r == .success else{throw Failure("AXPress 返回 \(r.rawValue)")}}
 func selfTest()throws {
  func check(_ ok:Bool,_ name:String)throws{guard ok else{throw Failure("测试失败：\(name)")};log("测试通过",["项目":name])}
+ let desktop:[String:Any]=[kCGSessionOnConsoleKey as String:true,kCGSessionLoginDoneKey as String:true,"CGSSessionScreenIsLocked":false]
+ try check(desktopProblem(desktop)==nil,"已登录未锁屏的控制台桌面可用")
+ var locked=desktop;locked["CGSSessionScreenIsLocked"]=true
+ try check(desktopProblem(locked)?.contains("已锁屏")==true,"锁屏原因单独报告")
+ var loggedOut=desktop;loggedOut[kCGSessionLoginDoneKey as String]=false
+ try check(desktopProblem(loggedOut)?.contains("退出登录")==true,"未完成登录原因单独报告")
+ var remote=desktop;remote[kCGSessionOnConsoleKey as String]=false
+ try check(desktopProblem(remote)?.contains("控制台")==true && desktopProblem(nil) != nil,"非控制台或会话不可读拒绝操作")
+ var focusReads=0;var focusWaits=0
+ try requireFrontmost(42,probe:{focusReads+=1;return focusReads<3 ? nil:42},wait:{_ in focusWaits+=1})
+ try check(focusReads==3 && focusWaits==2,"系统焦点短暂不可读时有限重读后通过")
+ focusReads=0;focusWaits=0
+ do {
+  try requireFrontmost(42,probe:{focusReads+=1;return 99},wait:{_ in focusWaits+=1})
+  throw Failure("测试失败：其它应用在前台仍通过")
+ }catch let e as Failure{try check(!e.description.hasPrefix("测试失败") && focusReads==1 && focusWaits==0,"真实切换到其它应用立即拒绝，不抢焦点")}
+ focusReads=0;focusWaits=0
+ do {
+  try requireFrontmost(42,probe:{focusReads+=1;return nil},wait:{_ in focusWaits+=1})
+  throw Failure("测试失败：持续无法读取焦点仍通过")
+ }catch let e as Failure{try check(e.description.contains("连续读取失败") && focusReads==4 && focusWaits==3,"持续无法读取系统焦点时明确拒绝且有界退出")}
+ focusReads=0
+ do {
+  try requireFrontmost(42,probe:{focusReads+=1;return focusReads==1 ? nil:99},wait:{_ in})
+  throw Failure("测试失败：重读时切到其它应用仍通过")
+ }catch let e as Failure{try check(!e.description.hasPrefix("测试失败") && focusReads==2,"重读期间确认其它前台应用时立即拒绝")}
  try check(exact(" \n继续\t") && !exact("继续吧") && !exact(""),"草稿精确匹配")
  let history=Node("AXGroup","",children:[Node("AXStaticText","","继续")])
  do{_=try ready(history);throw Failure("测试失败：历史误识别")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败"),"历史继续不能作为草稿")}
@@ -306,11 +347,15 @@ func selfTest()throws {
  do{_=try identity(identified);throw Failure("测试失败：重名身份")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败"),"重名会话拒绝识别")}
 
 }
+func desktopProblem(_ session:[String:Any]?)->String? {
+ guard let session=session else{return "无法读取 macOS 图形会话状态"}
+ if session["CGSSessionScreenIsLocked"] as? Bool == true {return "桌面已锁屏，请在本机解锁"}
+ guard session[kCGSessionLoginDoneKey as String] as? Bool == true else{return "本机桌面尚未完成登录或已退出登录"}
+ guard session[kCGSessionOnConsoleKey as String] as? Bool == true else{return "当前用户不在控制台图形会话，可能切换了用户或通过远程会话启动"}
+ return nil
+}
 func requireInteractiveDesktop()throws {
- guard let session=CGSessionCopyCurrentDictionary() as? [String:Any],
-       session[kCGSessionOnConsoleKey as String] as? Bool == true,
-       session[kCGSessionLoginDoneKey as String] as? Bool == true,
-       session["CGSSessionScreenIsLocked"] as? Bool != true else{throw Failure("当前不是已登录且未锁屏的控制台图形会话")}
+ if let problem=desktopProblem(CGSessionCopyCurrentDictionary() as? [String:Any]) {throw Failure(problem)}
 }
 // 权限预检只查询系统信任状态，不读取聊天、不激活目标应用。
 func checkAccessibilityPermission(prompt:Bool)throws {
@@ -340,6 +385,12 @@ func run()throws->Int32 {
  // 这是进程启动后的首次查询，尚未切换应用；系统 AX 初始化前可能读不到焦点。
  // 仅用它记录返回目标，切换后的安全判断一律使用实时 AX 查询。
  let launchingApp=NSWorkspace.shared.frontmostApplication
+ if args==["--check-desktop"] {
+  if let problem=desktopProblem(CGSessionCopyCurrentDictionary() as? [String:Any]) {
+   print(problem);return 5
+  }
+  print("本机桌面已登录且未锁屏");return 0
+ }
  if args==["--self-test"]{try selfTest();return 0}
  if args==["--check-permissions"] || args==["--request-permissions"] {
   try checkAccessibilityPermission(prompt:args==["--request-permissions"]);return 0
@@ -391,15 +442,13 @@ func run()throws->Int32 {
  }
  if schedulingPreflight {log("启动应用",["标识":launchingApp?.bundleIdentifier ?? "未知"])}
  if !args.contains("--inspect"){app.activate()}
- Thread.sleep(forTimeInterval:1)
- if !args.contains("--inspect"),frontmostApplication()?.processIdentifier != app.processIdentifier {
-  throw Failure("无法确认 Codex 已切换到前台，请关闭遮挡窗口后重试")
- }
+ pause(1)
+ if !args.contains("--inspect") {try requireFrontmost(app.processIdentifier)}
  var windows:[AXUIElement]=[]
  for attempt in 0..<3 {
   windows=(read(ax,"AXChildren") as? [AXUIElement] ?? []).filter{read($0,"AXRole") as? String == "AXWindow"}
   if !windows.isEmpty{break}
-  if attempt<2{Thread.sleep(forTimeInterval:0.5)}
+  if attempt<2{pause(0.5)}
  }
  log("运行环境",["进程":Int(app.processIdentifier),"名称":app.localizedName ?? "","架构":ProcessInfo.processInfo.machineArchitecture,"窗口数":windows.count])
  // 仅使用系统明确报告的焦点窗口，禁止按窗口数组顺序猜测。
@@ -410,7 +459,7 @@ func run()throws->Int32 {
  func capture(_ history:Bool)throws->Node {
   var last:Error=Failure("未读取快照")
   for attempt in 0..<3 {
-   do{return try snapshot(window,includeHistory:history)}catch{last=error;if attempt<2{Thread.sleep(forTimeInterval:0.2)}}
+   do{return try snapshot(window,includeHistory:history)}catch{last=error;if attempt<2{pause(0.2)}}
   }
   throw last
  }
@@ -420,8 +469,8 @@ func run()throws->Int32 {
   guard !args.contains("--inspect") else{return page}
   return try revealSidebar(page,capture:{try capture(history)},perform:{button in
    try requireInteractiveDesktop()
-   guard frontmostApplication()?.processIdentifier==app.processIdentifier,
-         let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window) else{throw Failure("展开侧边栏前焦点窗口改变，请保持 Codex 在前台后重试")}
+   try requireFrontmost(app.processIdentifier)
+   guard let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window) else{throw Failure("展开侧边栏前焦点窗口改变，请保持 Codex 在前台后重试")}
    try press(button)
    log("自动展开侧边栏",["说明":"已点击顶部显示侧边栏，等待固定侧栏加载；未发送消息"])
   })
@@ -431,7 +480,7 @@ func run()throws->Int32 {
  var p=current ? Pins(reliable:false,rows:[],reason:"仅当前会话限定，未枚举置顶目标") : pins(initial)
  if !current {
   for _ in 0..<5 where !p.reliable {
-   Thread.sleep(forTimeInterval:0.3);initial=try get(false);p=pins(initial)
+   pause(0.3);initial=try get(false);p=pins(initial)
   }
  }
  if schedulingPreflight {
@@ -471,14 +520,14 @@ func run()throws->Int32 {
    if !current && p.reliable {
     var fresh=pins(page)
     for _ in 0..<3 where !fresh.reliable {
-     Thread.sleep(forTimeInterval:0.3);page=try get(false);fresh=pins(page)
+     pause(0.3);page=try get(false);fresh=pins(page)
     }
     guard fresh.reliable else{throw Failure("置顶列表读取仍不可靠，跳过") }
     let row=try one(fresh.rows.filter{$0.title==title},"目标已取消置顶或不唯一")
     guard !row.all.contains(where:{$0.sub=="AXApplicationStatus" && ["处理中","In progress"].contains($0.title)}) else{throw Failure("侧边栏显示任务运行中")}
     if (try? identity(page)) != title {
      try press(row)
-     for _ in 0..<8 {Thread.sleep(forTimeInterval:0.25);page=try get(false);if (try? identity(page))==title{break}}
+     for _ in 0..<8 {pause(0.25);page=try get(false);if (try? identity(page))==title{break}}
     }
    }
    guard try identity(page)==title else{throw Failure("切换后会话身份不符，禁止操作")}
@@ -489,23 +538,22 @@ func run()throws->Int32 {
     log("目标输入框诊断",["会话":title,"输入框":page.all.filter{["AXTextArea","AXTextField"].contains($0.role)}.map{["标签":$0.title,"恰好继续":exact($0.value),"字符数":$0.value.count] as [String:Any]},"主区域数":page.all.filter{$0.sub=="AXLandmarkMain"}.count])
     throw error
    }
-   if schedulingPreflight {
-    try requireInteractiveDesktop()
-    guard frontmostApplication()?.processIdentifier==app.processIdentifier,
-          let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window) else{throw Failure("检查期间前台应用或焦点窗口改变，请保持 Codex 在前台后重试")}
-   }
+   // 只读测试也校验正式执行的焦点条件，不能把后台可读误报为可发送。
+   try requireInteractiveDesktop()
+   try requireFrontmost(app.processIdentifier)
+   guard let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window) else{throw Failure("检查期间焦点窗口改变，请保持 Codex 在前台后重试")}
    let diagnosticBaseline=userMessages(page)
    guard diagnosticBaseline>=0 else{throw Failure("无法建立用户消息基线，未发送；请检查用户消息正文是否可读或包含未知控件")}
    if args.contains("--test"){checkedCount+=1;log("目标识别通过，未发送",["会话":title,"用户继续消息基线":diagnosticBaseline,"发送按钮可用":checkedReady.button.enabled]);continue}
-   guard frontmostApplication()?.processIdentifier==app.processIdentifier else{throw Failure("Codex 不在前台；为避免抢焦点未发送")}
+   try requireFrontmost(app.processIdentifier)
    // 重建树并重新验证，绝不依赖之前保存的输入框或按钮。
    page=try get();guard try identity(page)==title else{throw Failure("提交前会话发生变化")}
    try requireInteractiveDesktop()
    let r=try ready(page);let before=userMessages(page)
    guard before>=0 else{throw Failure("无法建立用户消息基线，未发送")}
    guard !attempted.contains(title) else{throw Failure("本次运行已经尝试过此会话")}
-   guard frontmostApplication()?.processIdentifier==app.processIdentifier,
-         let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window),
+   try requireFrontmost(app.processIdentifier)
+   guard let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window),
          let input=r.input.e,exact(read(input,"AXValue") as? String ?? ""),let b=r.button.e,(read(b,"AXEnabled") as? Bool)==true,read(window,"AXTitle") as? String==title else{throw Failure("提交前最后检查失败")}
    attempted.insert(title)
    log("准备单次提交",["会话":title,"原用户继续消息数":before])
@@ -513,7 +561,7 @@ func run()throws->Int32 {
    log("操作已触发",["会话":title,"AX返回码":result.rawValue])
    var confirmed=false
    for _ in 0..<12 {
-    Thread.sleep(forTimeInterval:0.25)
+    pause(0.25)
     guard let after=try? get(),(try? identity(after))==title else{break}
     if userMessages(after)>before {log("消息已提交至界面历史",["会话":title,"证据":"新增你说消息块且正文恰好继续","服务端接收":"无法由AX独立证明"]);confirmed=true;confirmedCount+=1;break}
    }

@@ -69,6 +69,8 @@ def recovery_hint(reason):
         return '等待正在操作界面的实例结束，再重新运行；不要同时启动多个执行任务。'
     if '不可写' in reason:
         return f'检查项目和 logs 目录的所有者及写入权限：{BASE}。'
+    if '前台' in reason or '焦点' in reason:
+        return '保持 Codex 在前台；检查及执行期间不要切换应用。程序不会自动抢回焦点。'
     if '进程' in reason:
         return '先打开包含 Codex 模式的桌面应用（某些版本名为 ChatGPT）并登录，保留一个目标应用实例，再重新运行。'
     if '窗口' in reason or '前台' in reason or '焦点' in reason:
@@ -163,6 +165,36 @@ def preflight(inspect=False):
     return 0, targets
 
 
+def wait_for_desktop(epoch):
+    """仅重试无界面操作的桌面探测，绝不重试发送。"""
+    warned = False
+    deadline = time.monotonic() + max(0, min(120, epoch + 120 - time.time()))
+    while time.time() <= epoch + 120 and time.monotonic() <= deadline:
+        result = subprocess.run(native_command('--check-desktop'), check=False,
+                                capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            # 探测自身耗时也计入迟到上限。
+            if time.time() > epoch + 120 or time.monotonic() > deadline:
+                break
+            if warned:
+                log('桌面已恢复', 说明='将重新检查原预约目标与发送条件')
+            return True
+        if result.returncode != 5:
+            log('预约已取消', 原因='桌面探测异常；未执行发送', 详情=result.stdout.strip())
+            return False
+        if not warned:
+            log('等待桌面解锁', 原因=result.stdout.strip(),
+                截止时间=format_beijing(epoch + 120, seconds=True),
+                处理='请在本机解锁并登录；超时取消，本程序不会自动解锁')
+            warned = True
+        remaining = min(epoch + 120 - time.time(), deadline - time.monotonic())
+        if remaining <= 0:
+            break
+        time.sleep(min(5, remaining))
+    log('预约已取消', 原因='预约时间两分钟内桌面未恢复，未执行发送；解锁后请重新预约')
+    return False
+
+
 def main():
     if sys.argv[1:] not in ([], ['--inspect'], ['--preflight']):
         raise ValueError('预约器参数错误。')
@@ -182,11 +214,13 @@ def main():
         print(f'北京时间今天的 {value.strip()} 已经过了，预约明天：{target}。')
     log('已预约一次执行', 输入时间=value.strip(), 预约时间=target, 目标=targets if not inspect else ['当前只读窗口'])
     print('请保持本终端进程运行；关闭终端或 Ctrl+C 会取消预约。')
-    print('已尽可能防止空闲睡眠；合盖、锁屏、退出登录可能导致 GUI 执行失败。', flush=True)
+    print('预约期间防止系统及显示器空闲睡眠；请保持开盖。手动锁屏、屏保锁定、切换用户或退出登录仍会阻止发送。到点后最多等待两分钟解锁，超时取消。', flush=True)
     while time.time() < epoch:
         time.sleep(min(5, max(0, epoch-time.time())))
     if time.time()-epoch > 120:
         log('预约已取消', 原因='超过预约时间两分钟，可能经历睡眠')
+        return 2
+    if not wait_for_desktop(epoch):
         return 2
     log('实际开始执行', 预约时间=target)
     arguments = ['--inspect'] if inspect else ['--run-now']

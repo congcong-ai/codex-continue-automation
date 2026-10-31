@@ -55,9 +55,9 @@ fi
 if $SCHEDULE; then
   echo "[通过] 辅助程序：$NATIVE_ARCH 架构与本地签名校验通过"
   case "${1:-}" in
-    --schedule-inspect) exec /usr/bin/caffeinate -i "$PYTHON" "$ROOT/schedule.py" --inspect ;;
+    --schedule-inspect) exec /usr/bin/caffeinate -di "$PYTHON" "$ROOT/schedule.py" --inspect ;;
     --preflight) exec "$PYTHON" "$ROOT/schedule.py" --preflight ;;
-    '') exec /usr/bin/caffeinate -i "$PYTHON" "$ROOT/schedule.py" ;;
+    '') exec /usr/bin/caffeinate -di "$PYTHON" "$ROOT/schedule.py" ;;
   esac
 fi
 exec /usr/bin/arch "-$NATIVE_ARCH" "$ROOT/bin/codex-continue" "$@"

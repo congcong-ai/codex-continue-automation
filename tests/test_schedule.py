@@ -76,7 +76,7 @@ class ExecutionTests(unittest.TestCase):
         from unittest.mock import patch, Mock
         clock=iter([1000.0,1000.0,1001.0,1202.0 if late else 1001.0])
         argv=['schedule.py','--inspect'] if inspect else ['schedule.py']
-        with patch.object(m.sys,'argv',argv), patch('builtins.input',return_value='13:40'), patch.object(m,'preflight',return_value=(0,['目标甲','目标乙'])) as check, patch.object(m,'parse_time',return_value=(1001.0,False)), patch.object(m.time,'time',side_effect=lambda:next(clock)), patch.object(m.time,'sleep'), patch.object(m,'log') as logger, patch.object(m.subprocess,'run',return_value=Mock(returncode=code)) as run, patch.dict(m.os.environ,{},clear=True):
+        with patch.object(m.sys,'argv',argv), patch('builtins.input',return_value='13:40'), patch.object(m,'preflight',return_value=(0,['目标甲','目标乙'])) as check, patch.object(m,'wait_for_desktop',return_value=True), patch.object(m,'parse_time',return_value=(1001.0,False)), patch.object(m.time,'time',side_effect=lambda:next(clock)), patch.object(m.time,'sleep'), patch.object(m,'log') as logger, patch.object(m.subprocess,'run',return_value=Mock(returncode=code)) as run, patch.dict(m.os.environ,{},clear=True):
             result=m.main()
             return result,run,logger,check
 
@@ -96,6 +96,12 @@ class ExecutionTests(unittest.TestCase):
         result,run,_,_=self.run_main(late=True)
         self.assertEqual(result,2)
         run.assert_not_called()
+
+    def test_desktop_timeout_never_calls_send(self):
+        from unittest.mock import patch
+        with patch.object(m.sys,'argv',['schedule.py']), patch.object(m,'preflight',return_value=(0,['目标甲'])), patch('builtins.input',return_value='13:40'), patch.object(m,'parse_time',return_value=(1000,False)), patch.object(m.time,'time',return_value=1001), patch.object(m,'wait_for_desktop',return_value=False), patch.object(m,'log'), patch.object(m.subprocess,'run') as send:
+            self.assertEqual(m.main(),2)
+            send.assert_not_called()
 
     def test_failed_check_never_prompts_or_waits(self):
         from unittest.mock import patch
@@ -286,3 +292,41 @@ class StartupProcessTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class DesktopWaitTests(unittest.TestCase):
+    def simulate(self, codes, *, start=1000, step=5):
+        from unittest.mock import patch, Mock
+        clock=[start]
+        def sleep(seconds): clock[0]+=max(seconds,step)
+        with patch.object(m.time,'time',side_effect=lambda:clock[0]), patch.object(m.time,'monotonic',side_effect=lambda:clock[0]), patch.object(m.time,'sleep',side_effect=sleep), patch.object(m,'log') as logger, patch.object(m.subprocess,'run',side_effect=[Mock(returncode=c,stdout='桌面已锁屏') for c in codes]) as run:
+            result=m.wait_for_desktop(1000)
+            self.assertTrue(all(call.args[0][-1]=='--check-desktop' for call in run.call_args_list))
+            return result, run.call_count, logger
+
+    def test_unlocked_immediately(self):
+        result,count,_=self.simulate([0])
+        self.assertTrue(result)
+        self.assertEqual(count,1)
+
+    def test_unlock_then_continue(self):
+        result,count,logger=self.simulate([5,5,0])
+        self.assertTrue(result)
+        self.assertEqual(count,3)
+        self.assertEqual(logger.call_args_list[0].args[0],'等待桌面解锁')
+        self.assertEqual(logger.call_args_list[-1].args[0],'桌面已恢复')
+
+    def test_locked_until_deadline_cancels(self):
+        result,count,_=self.simulate([5]*25)
+        self.assertFalse(result)
+        self.assertEqual(count,25)
+
+    def test_already_late_does_not_probe(self):
+        result,count,_=self.simulate([],start=1121)
+        self.assertFalse(result)
+        self.assertEqual(count,0)
+
+    def test_probe_error_does_not_retry(self):
+        result,count,_=self.simulate([2])
+        self.assertFalse(result)
+        self.assertEqual(count,1)
