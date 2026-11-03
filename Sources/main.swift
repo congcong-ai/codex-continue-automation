@@ -33,14 +33,14 @@ func pause(_ seconds:TimeInterval) {RunLoop.current.run(until:Date(timeIntervalS
 // 一旦确认其它应用在前台，立即拒绝，不通过再次激活抢回焦点。
 func requireFrontmost(_ expected:pid_t,probe:()->pid_t? = {frontmostApplication()?.processIdentifier},
                       wait:(TimeInterval)->Void = pause)throws {
- for attempt in 0..<4 {
+ for attempt in 0..<11 {
   if let actual=probe() {
    guard actual==expected else{throw Failure("Codex 不在前台；当前前台进程 \(actual)，目标进程 \(expected)；为避免抢焦点未发送")}
    return
   }
-  if attempt<3 {wait(0.15)}
+  if attempt<10 {wait(0.3)}
  }
- throw Failure("系统 AX 前台焦点连续读取失败（已重读 3 次）；未发送，请保持桌面解锁后重试")
+ throw Failure("系统 AX 前台焦点连续读取失败（已重读 10 次）；未发送，请保持桌面解锁后重试")
 }
 final class Node {
  let e:AXUIElement?;let role:String;let title:String;let value:String;let sub:String;let enabled:Bool;var children:[Node];weak var parent:Node?
@@ -153,13 +153,25 @@ func ready(_ root:Node,allowDisabledSend:Bool = false)throws->Ready {
 }
 // 标题先更新不代表该会话的草稿与发送区域已经恢复。有限重读，不写入草稿。
 func waitForReadyTarget(_ title:String,initial:Node,allowDisabledSend:Bool = false,
-                        capture:()throws->Node,wait:(TimeInterval)->Void = {pause($0)})throws->Ready {
+                        capture:()throws->Node,waitForDisabledSend:Bool = false,
+                        wait:(TimeInterval)->Void = {pause($0)})throws->Ready {
  var page=initial
- let delays:[TimeInterval]=[0.25,0.5,1]
+ var waitingDisabled=false
+ let delays:[TimeInterval]=waitForDisabledSend ? [0.25,0.5,1]+Array(repeating:1.0,count:28) : [0.25,0.5,1]
  for attempt in 0...delays.count {
   guard try identity(page)==title else{throw Failure("等待输入框恢复期间会话身份改变，禁止操作")}
   do{return try ready(page,allowDisabledSend:allowDisabledSend)}catch{
    if attempt==delays.count {throw error}
+   // 长等待仅用于按钮暂时禁用；草稿变化、运行中等状态立即终止。
+   if waitForDisabledSend {
+    do {
+     _=try ready(page,allowDisabledSend:true)
+     if !waitingDisabled {log("等待发送按钮恢复",["会话":title,"最长等待秒数":30])}
+     waitingDisabled=true
+    } catch {
+     if waitingDisabled || attempt>=3 {throw error}
+    }
+   }
   }
   wait(delays[attempt]);page=try capture()
  }
@@ -222,7 +234,7 @@ func selfTest()throws {
  do {
   try requireFrontmost(42,probe:{focusReads+=1;return nil},wait:{_ in focusWaits+=1})
   throw Failure("测试失败：持续无法读取焦点仍通过")
- }catch let e as Failure{try check(e.description.contains("连续读取失败") && focusReads==4 && focusWaits==3,"持续无法读取系统焦点时明确拒绝且有界退出")}
+ }catch let e as Failure{try check(e.description.contains("连续读取失败") && focusReads==11 && focusWaits==10,"持续无法读取系统焦点时明确拒绝且有界退出")}
  focusReads=0
  do {
   try requireFrontmost(42,probe:{focusReads+=1;return focusReads==1 ? nil:99},wait:{_ in})
@@ -291,6 +303,21 @@ func selfTest()throws {
  let waitingPage=Node("AXWindow",children:[Node("AXGroup",sub:"AXLandmarkMain",children:[Node("AXGroup",children:[Node("AXTextArea","和 Codex 一起工作","继续"),disabledSend])])])
  try check(try ready(waitingPage,allowDisabledSend:true).button === disabledSend,"预约允许发送按钮因额度暂时禁用")
  do{_=try ready(waitingPage);throw Failure("测试失败：禁用发送按钮")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败"),"正式执行及普通测试仍拒绝禁用发送按钮")}
+ // 使用独立节点构造真实的按钮禁用状态。
+ func disabledTarget()->Node {
+  let target=loadingPage("继续")
+  let area=target.all.first{$0.sub=="AXLandmarkMain"}!
+  area.children=[Node("AXGroup",children:[Node("AXTextArea","和 Codex 一起工作","继续"),Node("AXButton","发送",enabled:false)])]
+  area.children[0].parent=area
+  return target
+ }
+ reads=0
+ let resumed=try waitForReadyTarget("等待测试",initial:disabledTarget(),capture:{reads+=1;return reads<5 ? disabledTarget():loaded},waitForDisabledSend:true,wait:{_ in})
+ try check(resumed.button.enabled && reads==5,"按钮超过原两秒窗口恢复后仍可继续检查")
+ reads=0
+ do{_=try waitForReadyTarget("等待测试",initial:disabledTarget(),capture:{reads+=1;return disabledTarget()},waitForDisabledSend:true,wait:{_ in});throw Failure("测试失败：永久禁用仍通过")}catch let e as Failure{try check(e.description=="发送按钮不可用" && reads==31,"按钮持续禁用时有界退出且不触发提交")}
+ reads=0
+ do{_=try waitForReadyTarget("等待测试",initial:disabledTarget(),capture:{reads+=1;return loadingPage("修改后的草稿")},waitForDisabledSend:true,wait:{_ in});throw Failure("测试失败：草稿被修改仍等待")}catch let e as Failure{try check(e.description=="composer 草稿不是恰好为继续" && reads==1,"等待按钮期间修改草稿立即终止")}
  let invalidWaitingPage=Node("AXWindow",children:[Node("AXGroup",sub:"AXLandmarkMain",children:[Node("AXGroup",children:[Node("AXTextArea","和 Codex 一起工作","其它草稿"),Node("AXButton","发送",enabled:false)])])])
  do{_=try ready(invalidWaitingPage,allowDisabledSend:true);throw Failure("测试失败：预约其它草稿")}catch let e as Failure{try check(!e.description.hasPrefix("测试失败"),"放宽发送按钮不放宽预约草稿要求")}
  scope.children.append(Node("AXButton","排队"))
@@ -534,7 +561,12 @@ func run()throws->Int32 {
    page=try get()
    guard try identity(page)==title else{throw Failure("加载完整目标后身份发生变化")}
    let checkedReady:Ready
-   do{checkedReady=try waitForReadyTarget(title,initial:page,allowDisabledSend:schedulingPreflight,capture:{page=try get();return page})}catch{
+   do{checkedReady=try waitForReadyTarget(title,initial:page,allowDisabledSend:schedulingPreflight,capture:{
+    try requireInteractiveDesktop()
+    try requireFrontmost(app.processIdentifier)
+    guard let focused=read(ax,"AXFocusedWindow"),CFEqual(focused,window) else{throw Failure("等待期间焦点窗口改变")}
+    page=try get();return page
+   },waitForDisabledSend:args.contains("--run-now"))}catch{
     log("目标输入框诊断",["会话":title,"输入框":page.all.filter{["AXTextArea","AXTextField"].contains($0.role)}.map{["标签":$0.title,"恰好继续":exact($0.value),"字符数":$0.value.count] as [String:Any]},"主区域数":page.all.filter{$0.sub=="AXLandmarkMain"}.count])
     throw error
    }
