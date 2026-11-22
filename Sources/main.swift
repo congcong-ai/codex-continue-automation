@@ -103,6 +103,20 @@ let stopNames:Set<String>=["停止","停止生成","停止响应","Stop","Stop g
 func exact(_ s:String)->Bool{s.trimmingCharacters(in:.whitespacesAndNewlines)=="继续"}
 func one(_ list:[Node],_ reason:String)throws->Node{guard list.count==1 else{throw Failure("\(reason)：找到 \(list.count) 个")};return list[0]}
 struct Pins {let reliable:Bool;let rows:[Node];let reason:String}
+func pinnedTarget(_ item:Node)->Node? {
+ let markers=item.all.filter{$0.role=="AXButton" && unpin.contains($0.title)}
+ guard markers.count==1 else{return nil}
+ let legacy=item.children.filter{$0.role=="AXButton" && !$0.title.isEmpty && $0.all.contains{$0.role=="AXButton" && unpin.contains($0.title)}}
+ if legacy.count==1{return legacy[0]}
+ guard legacy.isEmpty else{return nil}
+ // 新版界面把会话标题和取消置顶操作放在同一个有标题的 AXGroup 中，
+ // 标题按钮与取消置顶按钮是该组中的兄弟节点。
+ let containers=item.all.filter{$0.role=="AXGroup" && !$0.title.isEmpty && $0.all.contains(where:{$0 === markers[0]})}
+ guard containers.count==1 else{return nil}
+ let container=containers[0]
+ let targets=container.all.filter{$0.role=="AXButton" && $0.title==container.title && !unpin.contains($0.title)}
+ return targets.count==1 ? targets[0]:nil
+}
 func pins(_ root:Node)->Pins {
  let sides=sidebars(root)
  guard sides.count==1 else{return Pins(reliable:false,rows:[],reason:"无法唯一识别侧边栏")}
@@ -110,11 +124,10 @@ func pins(_ root:Node)->Pins {
  guard sections.count==1 else{return Pins(reliable:false,rows:[],reason:"无法唯一识别置顶分组")}
  let section=sections[0];let lists=section.all.filter{$0.role=="AXList"}
  guard lists.count==1 else{return Pins(reliable:false,rows:[],reason:"置顶分组折叠或列表结构未知")}
- let rows=lists[0].children.compactMap { item -> Node? in
-  let candidates=item.children.filter{$0.role=="AXButton" && $0.all.contains{unpin.contains($0.title)}}
-  return candidates.count==1 ? candidates[0]:nil
- }
- guard rows.count==lists[0].children.count,Set(rows.map{$0.title}).count==rows.count,rows.allSatisfy({!$0.title.isEmpty}) else{return Pins(reliable:false,rows:[],reason:"置顶列表存在未识别项或重名项")}
+ let rows=lists[0].children.compactMap(pinnedTarget)
+ guard rows.count==lists[0].children.count else{return Pins(reliable:false,rows:[],reason:"置顶列表存在无法唯一关联标题与取消置顶控件的行")}
+ guard rows.allSatisfy({!$0.title.isEmpty}) else{return Pins(reliable:false,rows:[],reason:"置顶列表存在空会话标题")}
+ guard Set(rows.map{$0.title}).count==rows.count else{return Pins(reliable:false,rows:[],reason:"置顶列表存在重名会话")}
  return Pins(reliable:true,rows:rows,reason:"置顶分组内每一行均有明确取消置顶按钮")
 }
 func limitedTargets(_ requested:[String],_ inventory:Pins)throws->[String] {
@@ -248,6 +261,15 @@ func selfTest()throws {
  let section=Node("AXGroup",children:[Node("AXButton","置顶"),list])
  let root=Node("AXWindow",children:[Node("AXGroup",sub:"AXLandmarkComplementary",children:[Node("AXGroup","应用导航",sub:"AXLandmarkNavigation"),section])])
  try check(pins(root).reliable && pins(root).rows.count==1,"明确置顶状态")
+ let groupedTitle=Node("AXButton","新版会话")
+ let groupedRow=Node("AXGroup",children:[Node("AXGroup","新版会话",children:[groupedTitle,Node("AXGroup",children:[Node("AXButton","取消置顶聊天"),Node("AXButton","更多")])])])
+ let groupedList=Node("AXList",children:[groupedRow])
+ let groupedRoot=Node("AXWindow",children:[Node("AXGroup",sub:"AXLandmarkComplementary",children:[Node("AXGroup","应用导航",sub:"AXLandmarkNavigation"),Node("AXGroup",children:[Node("AXButton","置顶"),groupedList])])])
+ try check(pins(groupedRoot).reliable && pins(groupedRoot).rows.first === groupedTitle,"新版分组置顶行可识别并绑定标题按钮")
+ let duplicateGroupedRow=Node("AXGroup",children:[Node("AXGroup","新版会话",children:[Node("AXButton","新版会话"),Node("AXGroup",children:[Node("AXButton","取消置顶聊天")])])])
+ groupedList.children.append(duplicateGroupedRow)
+ try check(!pins(groupedRoot).reliable && pins(groupedRoot).reason.contains("重名"),"新版置顶结构仍拒绝重名会话")
+ groupedList.children.removeLast()
  let show=Node("AXButton","显示侧边栏")
  let banner=Node("AXGroup",sub:"AXLandmarkBanner",children:[show])
  let folded=Node("AXWindow",children:[banner,Node("AXGroup",sub:"AXLandmarkComplementary",children:[Node("AXGroup","应用导航",sub:"AXLandmarkNavigation"),Node("AXButton","首页")])])
